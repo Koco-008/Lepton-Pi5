@@ -1,7 +1,18 @@
-KDIR ?= /home/speedy1/work/git_repos/ti-linux-kernel-dev/KERNEL
+KDIR ?= /lib/modules/$(shell uname -r)/build
+DTC ?= dtc
+PWD := $(CURDIR)
 
-default:
-	$(MAKE) ARCH=arm -C $(KDIR) M=$$PWD
+default: modules
+
+modules:
+	$(MAKE) -C $(KDIR) M="$(PWD)" modules
+
+flir-lepton-rpi5.dtbo: flir-lepton-rpi5.dts
+	$(DTC) -@ -I dts -O dtb -o $@ $<
+
+overlay: flir-lepton-rpi5.dtbo
 
 clean:
-	rm -f *.o *.a lepton.ko Module.symvers modules.order
+	rm -f *.o *.a *.ko *.mod *.mod.c *.dtbo Module.symvers modules.order .*.cmd
+
+.PHONY: default modules overlay clean

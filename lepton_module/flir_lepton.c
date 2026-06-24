@@ -6,14 +6,16 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
+#include <linux/delay.h>
 #include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
+#include <linux/property.h>
 #include <linux/spi/spi.h>
 #include <linux/spinlock.h>
-#include <asm/uaccess.h>
+#include <linux/wait.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-dev.h>
@@ -21,7 +23,8 @@
 #include <media/v4l2-event.h>
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-core.h>
-#include <media/videobuf2-dma-contig.h>
+#include <media/videobuf2-v4l2.h>
+#include <media/videobuf2-vmalloc.h>
 #include <media/videobuf2-memops.h>
 
 #include "flir_lepton.h"
@@ -35,22 +38,30 @@ enum lepton_model {
 struct spare_spi_buffer {
 	unsigned	len;
 	void		*rx_buf;
-	dma_addr_t	rx_dma;
 };
 
 struct lepton {
 	struct mutex mutex;
 	spinlock_t lock;
+	wait_queue_head_t xfer_wait;
 	bool started;
 	bool synced;
 	bool telemetry_enabled;
+	bool transfer_in_flight;
+	bool removing;
 	struct list_head unfilled_bufs; /* waiting to be filled with data */
 	struct spare_spi_buffer spare_buf; /* when not using unfilled_bufs */
 	struct v4l2_device *v4l2_dev;
 	struct video_device *vid_dev;
 	struct vb2_queue *q;
 	struct spi_device *spi_dev;
-	unsigned int vsync_count;
+	int irq;
+	u64 vsync_count;
+	u64 spi_complete_count;
+	u64 valid_subframe_count;
+	u64 invalid_subframe_count;
+	u64 sync_loss_count;
+	int last_spi_status;
 	unsigned int discard_count;
 	lepton_vospi_info lep_vospi_info;
 	struct lepton_buffer *current_lep_buf;
@@ -60,7 +71,7 @@ struct lepton {
 };
 
 struct lepton_buffer {
-	struct vb2_buffer buf;
+	struct vb2_v4l2_buffer vb;
 	struct list_head list;
 };
 
@@ -71,8 +82,8 @@ struct lepton_buffer {
 static int lepton_querycap(struct file *file, void *priv,
 			struct v4l2_capability *cap)
 {
-	strlcpy(cap->driver, LEPTON_MODULE_NAME, sizeof(cap->driver));
-	strlcpy(cap->card, "FLIR Lepton", sizeof(cap->driver));
+	strscpy(cap->driver, LEPTON_MODULE_NAME, sizeof(cap->driver));
+	strscpy(cap->card, "FLIR Lepton", sizeof(cap->card));
 	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s", LEPTON_MODULE_NAME);
 	return 0;
 }
@@ -317,7 +328,8 @@ int lepton_buf_prepare(struct vb2_buffer *vb)
 
 void lepton_buf_queue(struct vb2_buffer *vb)
 {
-	struct lepton_buffer *buf = container_of(vb, struct lepton_buffer, buf);
+	struct lepton_buffer *buf =
+		container_of(to_vb2_v4l2_buffer(vb), struct lepton_buffer, vb);
 	struct lepton *lep = vb2_get_drv_priv(vb->vb2_queue);
 	unsigned long flags;
 
@@ -347,7 +359,7 @@ void lepton_stop_streaming(struct vb2_queue *vq)
 	spin_lock_irqsave(&lep->lock, flags);
 	list_for_each_safe(pos, q, &lep->unfilled_bufs) {
 		lep_buf = list_entry(pos, struct lepton_buffer, list);
-		vb2_buffer_done(&lep_buf->buf, VB2_BUF_STATE_ERROR);
+		vb2_buffer_done(&lep_buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 		list_del(&lep_buf->list);
 	}
 
@@ -409,35 +421,52 @@ static void lepton_spi_done_callback(void *context)
 	unsigned long flags;
 	unsigned short *subframe_data = NULL;
 	struct lepton_buffer *lep_buf = NULL;
+	void *dst = NULL;
 	struct timespec64 now;
 	bool subframe_is_good = false;
+	int status;
 
 	ktime_get_ts64(&now);
 
 	spin_lock_irqsave(&lep->lock, flags);
+	status = lep->spi_msg->status;
 	lep->last_spi_done_ts.tv_sec = now.tv_sec;
 	lep->last_spi_done_ts.tv_nsec = now.tv_nsec;
+	lep->last_spi_status = status;
+	lep->spi_complete_count++;
 
 	/* current_lep_buf will already be NULL if spare buffer is in use;
-	 * non-NULL if instead data was transferred to a V4L-allocated buffer
-	 * for consumption by userspace
+	 * non-NULL if a V4L-allocated buffer should receive a copy after
+	 * the private SPI capture buffer has been validated.
 	 */
 	lep_buf = lep->current_lep_buf;
 	lep->current_lep_buf = NULL;
+	spin_unlock_irqrestore(&lep->lock, flags);
 
 	/* analyze data to decide if data is synced up into proper subframes yet,
 	 * so that data can be sent to userspace when V4L buffers are available
 	 */
-	subframe_data = lep->spi_xfer->rx_buf;
-    subframe_is_good = is_subframe_line_counter_valid(&lep->lep_vospi_info, subframe_data);
+	subframe_data = lep->spare_buf.rx_buf;
+	if (!status) {
+		subframe_is_good =
+			is_subframe_line_counter_valid(&lep->lep_vospi_info, subframe_data) &&
+			is_subframe_index_valid(&lep->lep_vospi_info, subframe_data);
+	}
 
+	spin_lock_irqsave(&lep->lock, flags);
 	if (subframe_is_good) {
 		lep->synced = true;
 		lep->discard_count = 0;
+		lep->valid_subframe_count++;
 	}
 	else {
+		if (lep->synced)
+			lep->sync_loss_count++;
 		lep->synced = false;
 		lep->discard_count++;
+		lep->invalid_subframe_count++;
+		if (lep->discard_count >= MAX_CONSEC_DISCARD_COUNT)
+			lep->lep_vospi_info.next_subframe_index = 1;
 	}
 
 	spin_unlock_irqrestore(&lep->lock, flags);
@@ -449,37 +478,67 @@ static void lepton_spi_done_callback(void *context)
 	 */
 	if (lep_buf) {
 		if (subframe_is_good) {
-			vb2_buffer_done(&lep_buf->buf, VB2_BUF_STATE_DONE); 
+			dst = vb2_plane_vaddr(&lep_buf->vb.vb2_buf, 0);
+			if (dst) {
+				memcpy(dst, lep->spare_buf.rx_buf,
+				       lep->lep_vospi_info.subframe_params.subframe_data_byte_size);
+				vb2_set_plane_payload(&lep_buf->vb.vb2_buf, 0,
+					lep->lep_vospi_info.subframe_params.subframe_data_byte_size);
+				vb2_buffer_done(&lep_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+			}
+			else {
+				vb2_buffer_done(&lep_buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
+			}
 		}
 		else {
-			pr_debug("Lost frame sync!\n");
-			vb2_buffer_done(&lep_buf->buf, VB2_BUF_STATE_ERROR); 
+			dev_warn_ratelimited(&lep->spi_dev->dev,
+					     "invalid VoSPI subframe, status=%d\n", status);
+			vb2_buffer_done(&lep_buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 		}
 	}
+
+	spin_lock_irqsave(&lep->lock, flags);
+	lep->transfer_in_flight = false;
+	spin_unlock_irqrestore(&lep->lock, flags);
+	wake_up(&lep->xfer_wait);
 }
 
 /* kick off a SPI transfer in interrupt context */
-static void lepton_start_transfer(struct lepton *lep, void *rx_buf, dma_addr_t rx_dma, size_t rx_len)
+static int lepton_start_transfer(struct lepton *lep, size_t rx_len)
 {
 	unsigned long flags;
+	int ret;
+
 	/* SPI message consists of one or more transfers,
 	 * in this case only one */
+
+	memset(lep->spare_buf.rx_buf, 0, rx_len);
 
 	spin_lock_irqsave(&lep->lock, flags);
 	spi_message_init(lep->spi_msg);
 	lep->spi_msg->complete = lepton_spi_done_callback;
 	lep->spi_msg->context = (void *)lep;
-	lep->spi_msg->is_dma_mapped = 1;
 
-	lep->spi_xfer->rx_buf = rx_buf;
-	lep->spi_xfer->rx_dma = rx_dma;
+	memset(lep->spi_xfer, 0, sizeof(*lep->spi_xfer));
+	lep->spi_xfer->rx_buf = lep->spare_buf.rx_buf;
 	lep->spi_xfer->len = rx_len;
-	memset(rx_buf, 0, rx_len);
+	lep->transfer_in_flight = true;
+	lep->last_spi_status = -EINPROGRESS;
 
 	/* assign this one transfer to message and send it to controller */
 	spi_message_add_tail(lep->spi_xfer, lep->spi_msg);
 	spin_unlock_irqrestore(&lep->lock, flags);
-	spi_async(lep->spi_dev, lep->spi_msg);
+	ret = spi_async(lep->spi_dev, lep->spi_msg);
+	if (ret) {
+		spin_lock_irqsave(&lep->lock, flags);
+		lep->transfer_in_flight = false;
+		lep->last_spi_status = ret;
+		lep->sync_loss_count++;
+		spin_unlock_irqrestore(&lep->lock, flags);
+		wake_up(&lep->xfer_wait);
+	}
+
+	return ret;
 }
 
 static int lepton_timing_ok(struct lepton *lep, struct timespec64 *now)
@@ -493,7 +552,7 @@ static int lepton_timing_ok(struct lepton *lep, struct timespec64 *now)
 	}
 	else {
 		delta = timespec64_sub(*now, lep->last_spi_done_ts);
-		if (delta.tv_nsec < MINIMUM_SPI_TRANSFER_QUIET_TIME) {
+		if (timespec64_to_ns(&delta) < MINIMUM_SPI_TRANSFER_QUIET_TIME) {
 			pr_debug("VSYNC warning!\n");
 		}
 	}
@@ -507,11 +566,10 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 	struct lepton *lep = NULL;
 	struct lepton_buffer *lep_buf = NULL;
 	unsigned long flags;
-	unsigned long *vaddr = NULL;
-	dma_addr_t dma_addr;
 	int synced = 0;
 	unsigned rx_len;
 	struct timespec64 now;
+	int ret;
 
 	ktime_get_ts64(&now); /* time at beginning of IRQ handler */
 	dev = &spi->dev;
@@ -527,10 +585,21 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 	spin_lock_irqsave(&lep->lock, flags);
 	lep->vsync_count++;
 
+	if (lep->removing) {
+		spin_unlock_irqrestore(&lep->lock, flags);
+		return IRQ_HANDLED;
+	}
+
 	/* Do not kick off another DMA if the previous has not
 	 * finished (which is a SERIOUS problem, since missing subframes
 	 * can knock lepton into a bad state that requires hardware reset 
 	 */
+	if (lep->transfer_in_flight) {
+		lep->sync_loss_count++;
+		spin_unlock_irqrestore(&lep->lock, flags);
+		return IRQ_HANDLED;
+	}
+
 	if (!lepton_timing_ok(lep, &now)) {
 		spin_unlock_irqrestore(&lep->lock, flags);
 		return IRQ_HANDLED;
@@ -539,7 +608,7 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 	/* If video is synced and there are V4L buffers available,
 	 * take the first one to fill with data
 	 */
-	if (lep->synced && !list_empty(&lep->unfilled_bufs)) {
+	if (lep->started && lep->synced && !list_empty(&lep->unfilled_bufs)) {
 		lep_buf = list_first_entry(&lep->unfilled_bufs, struct lepton_buffer, list);
 		list_del(&lep_buf->list);
 		lep->current_lep_buf = lep_buf;
@@ -571,35 +640,87 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 	 * is *always* clocked out in a timely manner, so the spare buffer
 	 * is used to clock out data when no V4L buffer is available.
 	 */
-	if (lep_buf && synced) {
-		/* kick off spi read to V4L buffer */
-		vaddr = vb2_plane_vaddr(&lep_buf->buf, 0);
-		dma_addr = vb2_dma_contig_plane_dma_addr(&lep_buf->buf, 0);
-		// printk(KERN_INFO "SPI read into %p (%u)\n", vaddr, dma_addr);
+	if (synced) {
 		rx_len = lep->lep_vospi_info.subframe_params.subframe_data_byte_size;
-		memset(vaddr, 0xa5, rx_len); //@@@@@
-		lepton_start_transfer(lep, vaddr, dma_addr, rx_len);
 	}
 	else {
 		/* kick off spi read to spare buffer, which has an extra line */
 		rx_len = lep->spare_buf.len;
-		lepton_start_transfer(lep, lep->spare_buf.rx_buf, lep->spare_buf.rx_dma, rx_len);
+	}
+	ret = lepton_start_transfer(lep, rx_len);
+	if (ret && lep_buf) {
+		spin_lock_irqsave(&lep->lock, flags);
+		lep->current_lep_buf = NULL;
+		spin_unlock_irqrestore(&lep->lock, flags);
+		vb2_buffer_done(&lep_buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 	}
 
 	return IRQ_HANDLED;
 }
 
+static lepton_version lepton_dt_version(struct spi_device *spi)
+{
+	const void *match_data;
+	const struct spi_device_id *id;
+	enum lepton_model model = FLIR_LEPTON2;
+
+	match_data = device_get_match_data(&spi->dev);
+	if (match_data) {
+		model = (enum lepton_model)(kernel_ulong_t)match_data;
+	}
+	else {
+		id = spi_get_device_id(spi);
+		if (id)
+			model = (enum lepton_model)id->driver_data;
+	}
+
+	return model == FLIR_LEPTON3 ? LEPTON_VERSION_3X : LEPTON_VERSION_2X;
+}
+
+#define LEPTON_COUNTER_ATTR(_name, _field, _fmt)			\
+static ssize_t _name##_show(struct device *dev,			\
+			    struct device_attribute *attr, char *buf)	\
+{									\
+	struct lepton *lep = dev_get_drvdata(dev);			\
+									\
+	return sysfs_emit(buf, _fmt "\n", lep->_field);			\
+}									\
+static DEVICE_ATTR_RO(_name)
+
+LEPTON_COUNTER_ATTR(vsync_count, vsync_count, "%llu");
+LEPTON_COUNTER_ATTR(spi_complete_count, spi_complete_count, "%llu");
+LEPTON_COUNTER_ATTR(valid_subframe_count, valid_subframe_count, "%llu");
+LEPTON_COUNTER_ATTR(invalid_subframe_count, invalid_subframe_count, "%llu");
+LEPTON_COUNTER_ATTR(sync_loss_count, sync_loss_count, "%llu");
+LEPTON_COUNTER_ATTR(last_spi_status, last_spi_status, "%d");
+LEPTON_COUNTER_ATTR(transfer_in_flight, transfer_in_flight, "%d");
+
+static struct attribute *lepton_attrs[] = {
+	&dev_attr_vsync_count.attr,
+	&dev_attr_spi_complete_count.attr,
+	&dev_attr_valid_subframe_count.attr,
+	&dev_attr_invalid_subframe_count.attr,
+	&dev_attr_sync_loss_count.attr,
+	&dev_attr_last_spi_status.attr,
+	&dev_attr_transfer_in_flight.attr,
+	NULL,
+};
+
+static const struct attribute_group lepton_attr_group = {
+	.attrs = lepton_attrs,
+};
+
 static int lepton_probe(struct spi_device *spi)
 {
 	struct lepton *lep = NULL;
 	struct device *dev = NULL;
-	struct device *dma_dev = NULL; /* device that can do DMA allocations */
 	struct device_node *of_node = NULL;
 	struct v4l2_device *v4l2_dev = NULL;
 	struct video_device *vid_dev = NULL;
 	struct vb2_queue *q = NULL;
 	struct spi_transfer *spi_xfer = NULL;
 	struct spi_message *spi_msg = NULL;
+	lepton_version lep_version;
 	int ret, irq = -1;
 
 	dev = &spi->dev;
@@ -608,11 +729,6 @@ static int lepton_probe(struct spi_device *spi)
 		dev_err(dev, "missing device tree entry");
 		return -EINVAL;
 	}
-
-	/* V4L2 DMA buffer allocations will use same device that SPI controller
-	 * normally uses for DMA mapping
-	 */
-	dma_dev = spi->master->dev.parent;
 
 	/* lepton struct keeps track of both video and spi-related structs,
 	 * and will be available in driver callbacks via private data pointers
@@ -625,12 +741,13 @@ static int lepton_probe(struct spi_device *spi)
 	}
 	mutex_init(&lep->mutex);
 	spin_lock_init(&lep->lock);
+	init_waitqueue_head(&lep->xfer_wait);
 
 	/* initialize frame dimensions
 	 */
 
-	// @@@ need lepton version and telemetry module parameters
-	init_lepton_info(&lep->lep_vospi_info, LEPTON_VERSION_2X, TELEMETRY_OFF);
+	lep_version = lepton_dt_version(spi);
+	init_lepton_info(&lep->lep_vospi_info, lep_version, TELEMETRY_OFF);
 
 	/* initialize v4l2_device -- used for tracking relationships among 
 	 * video-related hardware managed by the V4L2 subsystem 
@@ -661,12 +778,6 @@ static int lepton_probe(struct spi_device *spi)
 
 	*vid_dev = lepton_videodev_template;
 	vid_dev->v4l2_dev = v4l2_dev;
-	ret = video_register_device(vid_dev, VFL_TYPE_VIDEO, -1);
-	if (ret) {
-		/* now have non-devm (i.e. not automatically released when
-		   owning device struct is gone) resources to free */
-		goto unreg_v4l2_device;
-	}
 
 	/* initialize vb2_queue -- used to manage buffers for
 	 * capturing video data 
@@ -678,27 +789,27 @@ static int lepton_probe(struct spi_device *spi)
 		   owning device struct is gone) resources to free */
 		dev_err(dev, "failed to allocate queue struct");
 		ret = -ENOMEM;
-		goto unreg_video_and_v4l_device;
+		goto release_video_and_v4l_device;
 	}
 
-	q->dev = dma_dev;
+	q->dev = dev;
 	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 //	q->io_modes = VB2_MMAP | VB2_DMABUF | VB2_READ; //@@@ is DMABUF freebie with vb2 boilerplate?
 	q->io_modes = VB2_MMAP | VB2_READ;
 	q->buf_struct_size = sizeof(struct lepton_buffer);
-	q->gfp_flags = GFP_DMA32;
 	q->ops = &lepton_video_qops;
-	q->mem_ops = &vb2_dma_contig_memops;
+	q->mem_ops = &vb2_vmalloc_memops;
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &lep->mutex;
-	q->min_buffers_needed = 3;
+	q->min_queued_buffers = 3;
+	q->min_reqbufs_allocation = 3;
 
 	ret = vb2_queue_init(q);
 	if (ret) {
 		/* now have non-devm (i.e. not automatically released when
 		   owning device struct is gone) resources to free */
 		dev_err(dev, "failed to init queue struct");
-		goto unreg_video_and_v4l_device;
+		goto release_video_and_v4l_device;
 	}
 
 	/* initialize spi descriptors and transmit buffer
@@ -708,16 +819,16 @@ static int lepton_probe(struct spi_device *spi)
 	if (spi_xfer == NULL || spi_msg == NULL) {
 		dev_err(dev, "failed to allocate SPI message/transfer structs");
 		ret = -ENOMEM;
-		goto unreg_video_and_v4l_device;
+		goto release_video_and_v4l_device;
 	}
 	/* spare rx buffer when not using allocated V4L buf is subframe size + 1 line 
 	 * so that eventually we will sync up if we start out in middle of a subframe */
 	lep->spare_buf.len = lep->lep_vospi_info.subframe_params.subframe_data_byte_size + LEPTON_SUBFRAME_LINE_BYTE_WIDTH;
-	lep->spare_buf.rx_buf = dma_alloc_coherent(dma_dev, lep->spare_buf.len, &lep->spare_buf.rx_dma, GFP_KERNEL);
+	lep->spare_buf.rx_buf = devm_kzalloc(dev, lep->spare_buf.len, GFP_KERNEL);
 	if (lep->spare_buf.rx_buf == NULL) {
 		dev_err(dev, "failed to allocate SPI rx buffer");
 		ret = -ENOMEM;
-		goto unreg_video_and_v4l_device;
+		goto release_video_and_v4l_device;
 	}
 
     /* set up data pointers to be able to find any of the core structs
@@ -731,6 +842,8 @@ static int lepton_probe(struct spi_device *spi)
 	lep->spi_xfer = spi_xfer;
 	lep->spi_msg = spi_msg;
 	lep->current_lep_buf = NULL;
+	lep->irq = irq;
+	lep->last_spi_status = 0;
 
 	dev_set_drvdata(dev, lep);
 	video_set_drvdata(vid_dev, lep);
@@ -742,6 +855,10 @@ static int lepton_probe(struct spi_device *spi)
 
 	INIT_LIST_HEAD(&lep->unfilled_bufs);
 
+	ret = video_register_device(vid_dev, VFL_TYPE_VIDEO, -1);
+	if (ret)
+		goto release_video_and_v4l_device;
+
 	/* set up interrupt handler for lepton VSYNC (frame ready signal) 
 	 */
 
@@ -750,10 +867,17 @@ static int lepton_probe(struct spi_device *spi)
 		dev_err(dev, "failed to map irq");
 		goto unreg_video_and_v4l_device;
 	}
+	lep->irq = irq;
 
 	ret = devm_request_irq(dev, irq, lepton_vsync_handler, 0, dev_name(dev), spi);
 	if (ret) {
 		dev_err(dev, "failed to register irq");
+		goto unreg_video_and_v4l_device;
+	}
+
+	ret = sysfs_create_group(&dev->kobj, &lepton_attr_group);
+	if (ret) {
+		dev_err(dev, "failed to create diagnostics attributes");
 		goto unreg_video_and_v4l_device;
 	}
 
@@ -762,21 +886,38 @@ static int lepton_probe(struct spi_device *spi)
 
 unreg_video_and_v4l_device:
 	video_unregister_device(lep->vid_dev);
+	goto unreg_v4l2_device;
+release_video_and_v4l_device:
+	video_device_release(vid_dev);
 unreg_v4l2_device:
-	v4l2_device_unregister(lep->v4l2_dev);
+	v4l2_device_unregister(v4l2_dev);
 
 	return ret;
 }
 
-static int lepton_remove(struct spi_device *spi)
+static void lepton_remove(struct spi_device *spi)
 {
-    struct lepton *lep = dev_get_drvdata(&spi->dev);
+	struct lepton *lep = dev_get_drvdata(&spi->dev);
+	unsigned long flags;
+
+	sysfs_remove_group(&spi->dev.kobj, &lepton_attr_group);
+
+	spin_lock_irqsave(&lep->lock, flags);
+	lep->removing = true;
+	spin_unlock_irqrestore(&lep->lock, flags);
+
+	if (lep->irq > 0) {
+		disable_irq(lep->irq);
+		synchronize_irq(lep->irq);
+	}
+
+	if (!wait_event_timeout(lep->xfer_wait, !READ_ONCE(lep->transfer_in_flight),
+				msecs_to_jiffies(1000)))
+		dev_warn(&spi->dev, "timed out waiting for SPI transfer completion\n");
 
 	/* tear down the things that are not "devm" (device-managed) */
 	video_unregister_device(lep->vid_dev);
 	v4l2_device_unregister(lep->v4l2_dev);
-
-	return 0;
 }
 
 static struct spi_driver lepton_spi_driver = {

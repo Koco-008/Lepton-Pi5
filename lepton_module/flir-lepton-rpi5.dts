@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/bcm2835.h>
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target = <&spidev0>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@1 {
+		target = <&gpio>;
+		__overlay__ {
+			lepton_vsync_pin: lepton_vsync_pin {
+				brcm,pins = <17>;
+				brcm,function = <BCM2835_FSEL_GPIO_IN>;
+				brcm,pull = <0>;
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&spi0>;
+		__overlay__ {
+			status = "okay";
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			lepton: lepton@0 {
+				compatible = "flir,lepton3";
+				reg = <0>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&lepton_vsync_pin>;
+				spi-max-frequency = <20000000>;
+				spi-cpha;
+				spi-cpol;
+				interrupt-parent = <&gpio>;
+				interrupts = <17 IRQ_TYPE_EDGE_RISING>;
+			};
+		};
+	};
+
+	__overrides__ {
+		speed = <&lepton>, "spi-max-frequency:0";
+		vsync = <&lepton_vsync_pin>, "brcm,pins:0",
+			<&lepton>, "interrupts:0";
+	};
+};

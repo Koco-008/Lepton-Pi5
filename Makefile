@@ -1,4 +1,4 @@
-CROSS_COMPILE ?= arm-linux-gnueabihf-
+CROSS_COMPILE ?=
 CC=${CROSS_COMPILE}gcc
 TOPDIR:=$(shell pwd)
 
