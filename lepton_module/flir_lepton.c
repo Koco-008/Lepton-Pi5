@@ -10,6 +10,7 @@
 #include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
+#include <linux/ktime.h>
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
 #include <linux/property.h>
@@ -61,8 +62,10 @@ struct lepton {
 	u64 valid_subframe_count;
 	u64 invalid_subframe_count;
 	u64 sync_loss_count;
+	u64 resync_count;
 	int last_spi_status;
 	unsigned int discard_count;
+	ktime_t resync_resume;
 	lepton_vospi_info lep_vospi_info;
 	struct lepton_buffer *current_lep_buf;
 	struct spi_transfer *spi_xfer;
@@ -465,8 +468,12 @@ static void lepton_spi_done_callback(void *context)
 		lep->synced = false;
 		lep->discard_count++;
 		lep->invalid_subframe_count++;
-		if (lep->discard_count >= MAX_CONSEC_DISCARD_COUNT)
+		if (lep->discard_count >= MAX_CONSEC_DISCARD_COUNT) {
 			lep->lep_vospi_info.next_subframe_index = 1;
+			lep->discard_count = 0;
+			lep->resync_count++;
+			lep->resync_resume = ktime_add_ms(ktime_get(), 200);
+		}
 	}
 
 	spin_unlock_irqrestore(&lep->lock, flags);
@@ -568,9 +575,11 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 	unsigned long flags;
 	int synced = 0;
 	unsigned rx_len;
+	ktime_t now_ktime;
 	struct timespec64 now;
 	int ret;
 
+	now_ktime = ktime_get();
 	ktime_get_ts64(&now); /* time at beginning of IRQ handler */
 	dev = &spi->dev;
 	lep = dev_get_drvdata(dev);
@@ -596,6 +605,12 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 	 */
 	if (lep->transfer_in_flight) {
 		lep->sync_loss_count++;
+		spin_unlock_irqrestore(&lep->lock, flags);
+		return IRQ_HANDLED;
+	}
+
+	if (ktime_to_ns(lep->resync_resume) > 0 &&
+	    ktime_compare(now_ktime, lep->resync_resume) < 0) {
 		spin_unlock_irqrestore(&lep->lock, flags);
 		return IRQ_HANDLED;
 	}
@@ -692,6 +707,7 @@ LEPTON_COUNTER_ATTR(spi_complete_count, spi_complete_count, "%llu");
 LEPTON_COUNTER_ATTR(valid_subframe_count, valid_subframe_count, "%llu");
 LEPTON_COUNTER_ATTR(invalid_subframe_count, invalid_subframe_count, "%llu");
 LEPTON_COUNTER_ATTR(sync_loss_count, sync_loss_count, "%llu");
+LEPTON_COUNTER_ATTR(resync_count, resync_count, "%llu");
 LEPTON_COUNTER_ATTR(last_spi_status, last_spi_status, "%d");
 LEPTON_COUNTER_ATTR(transfer_in_flight, transfer_in_flight, "%d");
 
@@ -701,6 +717,7 @@ static struct attribute *lepton_attrs[] = {
 	&dev_attr_valid_subframe_count.attr,
 	&dev_attr_invalid_subframe_count.attr,
 	&dev_attr_sync_loss_count.attr,
+	&dev_attr_resync_count.attr,
 	&dev_attr_last_spi_status.attr,
 	&dev_attr_transfer_in_flight.attr,
 	NULL,

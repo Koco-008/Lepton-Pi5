@@ -155,6 +155,7 @@ The driver exposes read-only counters on the SPI device sysfs directory:
 - `valid_subframe_count`
 - `invalid_subframe_count`
 - `sync_loss_count`
+- `resync_count`
 - `last_spi_status`
 - `transfer_in_flight`
 

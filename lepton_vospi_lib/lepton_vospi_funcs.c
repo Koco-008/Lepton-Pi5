@@ -44,7 +44,7 @@ int init_lepton_info(lepton_vospi_info *lep_info, lepton_version lep_version, te
 		/* 4 subframes per frame, start counter at 1 */
 		lep_info->next_subframe_index = 1;
 	}
-	lep_info->subframe_params.line_count = lep_info->image_params.pixel_height;
+	lep_info->subframe_params.line_count = LEPTON_SUBFRAME_DATA_LINE_HEIGHT;
 	/* SPI xfer bytes per subframe, without telemetry */
 	lep_info->subframe_params.subframe_data_byte_size = LEPTON_SUBFRAME_SIZE;
 	lep_info->telemetry_loc = TELEMETRY_OFF;
@@ -66,7 +66,7 @@ int init_lepton_info(lepton_vospi_info *lep_info, lepton_version lep_version, te
 			 * size)
 			 */
 			lep_info->subframe_params.subframe_data_byte_size += LEPTON3_TELEMETRY_SUBFRAME_SIZE;
-			lep_info->subframe_params.line_count += LEPTON3_TELEMETRY_SUBFRAME_SIZE;
+			lep_info->subframe_params.line_count += LEPTON3_TELEMETRY_SUBFRAME_LINE_HEIGHT;
 		}
 	}
 	return 0;

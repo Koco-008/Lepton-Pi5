@@ -94,7 +94,7 @@ for dev in /sys/bus/spi/devices/*; do
 	case "$driver" in
 		*lepton*)
 			echo "-- $dev"
-			for attr in vsync_count spi_complete_count valid_subframe_count invalid_subframe_count sync_loss_count last_spi_status transfer_in_flight; do
+			for attr in vsync_count spi_complete_count valid_subframe_count invalid_subframe_count sync_loss_count resync_count last_spi_status transfer_in_flight; do
 				[ -r "$dev/$attr" ] && printf "%s=%s\n" "$attr" "$(cat "$dev/$attr")"
 			done
 			;;
