@@ -10,14 +10,12 @@
 #include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
-#include <linux/irq.h>
 #include <linux/ktime.h>
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
 #include <linux/property.h>
 #include <linux/spi/spi.h>
 #include <linux/spinlock.h>
-#include <linux/string.h>
 #include <linux/wait.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-ctrls.h>
@@ -38,10 +36,10 @@ enum lepton_model {
 	FLIR_LEPTON3	= 3,
 };
 
-static char *vsync_edge = "dt";
-module_param(vsync_edge, charp, 0444);
-MODULE_PARM_DESC(vsync_edge,
-		 "VSYNC IRQ edge: dt, rising, falling, or both. Default: dt");
+static uint xfer_delay_us;
+module_param(xfer_delay_us, uint, 0444);
+MODULE_PARM_DESC(xfer_delay_us,
+		 "Delay after VSYNC before starting SPI transfer, in microseconds");
 
 struct spare_spi_buffer {
 	unsigned	len;
@@ -637,6 +635,9 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 	lep->last_spi_done_ts.tv_sec = 0; /* reset timer for upcoming spi transfer */
 	spin_unlock_irqrestore(&lep->lock, flags);
 
+	if (xfer_delay_us)
+		udelay(xfer_delay_us);
+
 	/* driver provides a spare buffer for two purposes:
 	 * - achieving sync of video frames
 	 * - place to stash SPI data when no V4L buffers are available
@@ -695,38 +696,6 @@ static lepton_version lepton_dt_version(struct spi_device *spi)
 	}
 
 	return model == FLIR_LEPTON3 ? LEPTON_VERSION_3X : LEPTON_VERSION_2X;
-}
-
-static unsigned int lepton_irq_type(struct device *dev)
-{
-	if (!vsync_edge || strcmp(vsync_edge, "dt") == 0)
-		return 0;
-	if (strcmp(vsync_edge, "rising") == 0)
-		return IRQ_TYPE_EDGE_RISING;
-	if (strcmp(vsync_edge, "falling") == 0)
-		return IRQ_TYPE_EDGE_FALLING;
-	if (strcmp(vsync_edge, "both") == 0)
-		return IRQ_TYPE_EDGE_BOTH;
-
-	dev_warn(dev, "invalid vsync_edge=%s, using device tree IRQ flags\n",
-		 vsync_edge);
-	return 0;
-}
-
-static int lepton_configure_irq_type(struct device *dev, unsigned int irq)
-{
-	unsigned int irq_type = lepton_irq_type(dev);
-	int ret;
-
-	if (!irq_type)
-		return 0;
-
-	ret = irq_set_irq_type(irq, irq_type);
-	if (ret)
-		dev_err(dev, "failed to set vsync_edge=%s irq type: %d\n",
-			vsync_edge, ret);
-
-	return ret;
 }
 
 #define LEPTON_COUNTER_ATTR(_name, _field, _fmt)			\
@@ -923,10 +892,6 @@ static int lepton_probe(struct spi_device *spi)
 		goto unreg_video_and_v4l_device;
 	}
 	lep->irq = irq;
-
-	ret = lepton_configure_irq_type(dev, irq);
-	if (ret)
-		goto unreg_video_and_v4l_device;
 
 	ret = devm_request_irq(dev, irq, lepton_vsync_handler, 0,
 			       dev_name(dev), spi);
