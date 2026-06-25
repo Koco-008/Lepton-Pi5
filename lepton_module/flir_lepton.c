@@ -478,28 +478,23 @@ static void lepton_spi_done_callback(void *context)
 
 	spin_unlock_irqrestore(&lep->lock, flags);
 
-	/* V4L buffers need to be dispatched back to userspace,
-	 * marking it as good if validation check passed and otherwise
-	 * noting an error (userspace will thus be informed when 
-	 * synced video unexpectedly goes out of sync)
+	/* V4L buffers need to be dispatched back to userspace. The driver keeps
+	 * validation counters for diagnostics, but userspace needs raw VoSPI data
+	 * to recover subframe ordering after a sync loss.
 	 */
 	if (lep_buf) {
-		if (subframe_is_good) {
-			dst = vb2_plane_vaddr(&lep_buf->vb.vb2_buf, 0);
-			if (dst) {
-				memcpy(dst, lep->spare_buf.rx_buf,
-				       lep->lep_vospi_info.subframe_params.subframe_data_byte_size);
-				vb2_set_plane_payload(&lep_buf->vb.vb2_buf, 0,
-					lep->lep_vospi_info.subframe_params.subframe_data_byte_size);
-				vb2_buffer_done(&lep_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
-			}
-			else {
-				vb2_buffer_done(&lep_buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
-			}
+		dst = vb2_plane_vaddr(&lep_buf->vb.vb2_buf, 0);
+		if (!status && dst) {
+			memcpy(dst, lep->spare_buf.rx_buf,
+			       lep->lep_vospi_info.subframe_params.subframe_data_byte_size);
+			vb2_set_plane_payload(&lep_buf->vb.vb2_buf, 0,
+				lep->lep_vospi_info.subframe_params.subframe_data_byte_size);
+			vb2_buffer_done(&lep_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 		}
 		else {
 			dev_warn_ratelimited(&lep->spi_dev->dev,
-					     "invalid VoSPI subframe, status=%d\n", status);
+					     "failed VoSPI buffer, status=%d dst=%p\n",
+					     status, dst);
 			vb2_buffer_done(&lep_buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 		}
 	}
