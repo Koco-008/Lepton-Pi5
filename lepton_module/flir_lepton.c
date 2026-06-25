@@ -41,6 +41,11 @@ module_param(xfer_delay_us, uint, 0444);
 MODULE_PARM_DESC(xfer_delay_us,
 		 "Delay after VSYNC before starting SPI transfer, in microseconds");
 
+static uint spi_speed_hz;
+module_param(spi_speed_hz, uint, 0444);
+MODULE_PARM_DESC(spi_speed_hz,
+		 "Override SPI transfer speed in Hz. Default: device-tree speed");
+
 struct spare_spi_buffer {
 	unsigned	len;
 	void		*rx_buf;
@@ -531,6 +536,8 @@ static int lepton_start_transfer(struct lepton *lep, size_t rx_len)
 	memset(lep->spi_xfer, 0, sizeof(*lep->spi_xfer));
 	lep->spi_xfer->rx_buf = lep->spare_buf.rx_buf;
 	lep->spi_xfer->len = rx_len;
+	if (spi_speed_hz)
+		lep->spi_xfer->speed_hz = spi_speed_hz;
 	lep->transfer_in_flight = true;
 	lep->last_spi_status = -EINPROGRESS;
 
@@ -771,6 +778,17 @@ static int lepton_probe(struct spi_device *spi)
 
 	lep_version = lepton_dt_version(spi);
 	init_lepton_info(&lep->lep_vospi_info, lep_version, TELEMETRY_OFF);
+
+	if (spi_speed_hz) {
+		spi->max_speed_hz = spi_speed_hz;
+		ret = spi_setup(spi);
+		if (ret) {
+			dev_err(dev, "failed to configure spi_speed_hz=%u: %d\n",
+				spi_speed_hz, ret);
+			return ret;
+		}
+		dev_info(dev, "using spi_speed_hz=%u\n", spi_speed_hz);
+	}
 
 	/* initialize v4l2_device -- used for tracking relationships among 
 	 * video-related hardware managed by the V4L2 subsystem 

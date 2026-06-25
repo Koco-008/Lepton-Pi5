@@ -176,6 +176,17 @@ If `500` still returns only discard packets, retry with `1000`, `1500`, and
 `2000`. Keep this value below the interval where SPI reads start overlapping
 the next VSYNC.
 
+If all delay values still return discard packets, test lower SPI speeds:
+
+```sh
+sudo modprobe -r lepton
+sudo modprobe lepton spi_speed_hz=10000000
+sudo ./lepton_control/rpi_vsync_app
+```
+
+Then retry with `12000000`, `16000000`, and `18000000`. The overlay default is
+`20000000`.
+
 ## Capture Validation
 
 Use the existing collector for full Lepton 3.x frames:
