@@ -16,6 +16,7 @@
 #include <linux/property.h>
 #include <linux/spi/spi.h>
 #include <linux/spinlock.h>
+#include <linux/string.h>
 #include <linux/wait.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-ctrls.h>
@@ -35,6 +36,11 @@ enum lepton_model {
 	FLIR_LEPTON2	= 2,
 	FLIR_LEPTON3	= 3,
 };
+
+static char *vsync_edge = "dt";
+module_param(vsync_edge, charp, 0444);
+MODULE_PARM_DESC(vsync_edge,
+		 "VSYNC IRQ edge: dt, rising, falling, or both. Default: dt");
 
 struct spare_spi_buffer {
 	unsigned	len;
@@ -690,6 +696,22 @@ static lepton_version lepton_dt_version(struct spi_device *spi)
 	return model == FLIR_LEPTON3 ? LEPTON_VERSION_3X : LEPTON_VERSION_2X;
 }
 
+static unsigned long lepton_irq_flags(struct device *dev)
+{
+	if (!vsync_edge || strcmp(vsync_edge, "dt") == 0)
+		return 0;
+	if (strcmp(vsync_edge, "rising") == 0)
+		return IRQF_TRIGGER_RISING;
+	if (strcmp(vsync_edge, "falling") == 0)
+		return IRQF_TRIGGER_FALLING;
+	if (strcmp(vsync_edge, "both") == 0)
+		return IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING;
+
+	dev_warn(dev, "invalid vsync_edge=%s, using device tree IRQ flags\n",
+		 vsync_edge);
+	return 0;
+}
+
 #define LEPTON_COUNTER_ATTR(_name, _field, _fmt)			\
 static ssize_t _name##_show(struct device *dev,			\
 			    struct device_attribute *attr, char *buf)	\
@@ -884,7 +906,8 @@ static int lepton_probe(struct spi_device *spi)
 	}
 	lep->irq = irq;
 
-	ret = devm_request_irq(dev, irq, lepton_vsync_handler, 0, dev_name(dev), spi);
+	ret = devm_request_irq(dev, irq, lepton_vsync_handler,
+			       lepton_irq_flags(dev), dev_name(dev), spi);
 	if (ret) {
 		dev_err(dev, "failed to register irq");
 		goto unreg_video_and_v4l_device;

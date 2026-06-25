@@ -161,6 +161,18 @@ The driver exposes read-only counters on the SPI device sysfs directory:
 
 Use `tools/diagnose.sh` to collect the common state without secrets.
 
+If capture returns only discard packets such as `2fff` or `5fff`, test the
+opposite VSYNC IRQ edge without changing the overlay:
+
+```sh
+sudo modprobe -r lepton
+sudo modprobe lepton vsync_edge=falling
+sudo ./lepton_control/rpi_vsync_app
+```
+
+Valid `vsync_edge` values are `dt`, `rising`, `falling`, and `both`. The
+default `dt` uses the edge from the device-tree overlay.
+
 ## Capture Validation
 
 Use the existing collector for full Lepton 3.x frames:
