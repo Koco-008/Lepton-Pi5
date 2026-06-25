@@ -285,7 +285,7 @@ static struct video_device lepton_videodev_template = {
  * video buffer queue management
  */
 
-int lepton_queue_setup(struct vb2_queue *vq,
+static int lepton_queue_setup(struct vb2_queue *vq,
 			   unsigned int *nbuffers, unsigned int *nplanes,
 			   unsigned int sizes[], struct device *alloc_devs[])
 {
@@ -301,15 +301,15 @@ int lepton_queue_setup(struct vb2_queue *vq,
 			return -EINVAL;
 		size = sizes[0];
 	}
-	if (vq->num_buffers + *nbuffers < 2)
-		*nbuffers = 2 - vq->num_buffers;
+	if (*nbuffers < 2)
+		*nbuffers = 2;
 	*nplanes = 1;
 	sizes[0] = size;
 	pr_debug("get %d buffers, each holding %d bytes.\n", *nbuffers, sizes[0]);
 	return 0;
 }
 
-int lepton_buf_prepare(struct vb2_buffer *vb)
+static int lepton_buf_prepare(struct vb2_buffer *vb)
 {
 	struct lepton *lep = NULL;
 
@@ -326,7 +326,7 @@ int lepton_buf_prepare(struct vb2_buffer *vb)
 	return 0;
 }
 
-void lepton_buf_queue(struct vb2_buffer *vb)
+static void lepton_buf_queue(struct vb2_buffer *vb)
 {
 	struct lepton_buffer *buf =
 		container_of(to_vb2_v4l2_buffer(vb), struct lepton_buffer, vb);
@@ -338,7 +338,7 @@ void lepton_buf_queue(struct vb2_buffer *vb)
 	spin_unlock_irqrestore(&lep->lock, flags);
 }
 
-int lepton_start_streaming(struct vb2_queue *vq, unsigned int count)
+static int lepton_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct lepton *lep = vb2_get_drv_priv(vq);
 	unsigned long flags;
@@ -349,7 +349,7 @@ int lepton_start_streaming(struct vb2_queue *vq, unsigned int count)
 	return 0;
 }
 
-void lepton_stop_streaming(struct vb2_queue *vq)
+static void lepton_stop_streaming(struct vb2_queue *vq)
 {
 	struct lepton *lep = vb2_get_drv_priv(vq);
 	struct lepton_buffer *lep_buf = NULL;
@@ -547,7 +547,7 @@ static int lepton_timing_ok(struct lepton *lep, struct timespec64 *now)
 	int timing_ok = 1;
 
 	if (lep->last_spi_done_ts.tv_sec == 0) {
-		pr_debug("VSYNC %d miss!\n", lep->vsync_count);
+		pr_debug("VSYNC %llu miss!\n", lep->vsync_count);
 		timing_ok = 0;
 	}
 	else {
@@ -577,7 +577,7 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 
 #if 0
 	if (printk_ratelimit()) {
-		pr_debug("VSYNC %d", lep->vsync_count);
+		pr_debug("VSYNC %llu", lep->vsync_count);
 		// printk(KERN_INFO "spi=%p dev=%p lep=%p\n", spi, dev, lep);
 	}
 #endif

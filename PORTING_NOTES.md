@@ -63,3 +63,16 @@ modinfo ./lepton.ko
 
 Then review and save the full build log. Do not install the module or overlay
 until the build is clean enough to explain every remaining warning.
+
+## 2026-06-25 Target Build Feedback
+
+First target build on `6.18.34+rpt-rpi-2712` reached `flir_lepton.o` and found:
+
+- `struct vb2_queue` no longer has `num_buffers`; queue setup now enforces the
+  local minimum only against `*nbuffers`.
+- vb2 callbacks needed internal linkage to avoid `-Wmissing-prototypes`
+  warnings.
+- `vsync_count` is `u64`, so debug formats now use `%llu`.
+- The standalone `dtc -@ -I dts` overlay build did not preprocess C-style
+  `#include` directives; the Pi 5 overlay now uses numeric values for GPIO input
+  function (`0`) and rising-edge IRQ (`1`) so it builds with plain `dtc`.

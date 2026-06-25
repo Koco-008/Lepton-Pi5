@@ -30,12 +30,28 @@ Do not drive manual userspace CS and kernel SPI CS at the same time.
 
 ## Build
 
-Install the matching kernel headers on the target Pi. The expected header link
-for the task target is:
+Install the normal build tools:
+
+```sh
+sudo apt update
+sudo apt install -y build-essential device-tree-compiler i2c-tools v4l-utils
+```
+
+On Debian 13 / Raspberry Pi kernel 6.18, `raspberrypi-kernel-headers` may not be
+available as a package name. That is fine if the matching header link already
+exists. The expected header link for the task target is:
 
 ```sh
 /lib/modules/6.18.34+rpt-rpi-2712/build
 ```
+
+Check the active system:
+
+```sh
+ls -l /lib/modules/$(uname -r)/build
+```
+
+Do not install or build against headers for a different kernel.
 
 Build the module and overlay:
 
@@ -56,6 +72,12 @@ make
 
 The top-level Makefile defaults to the native compiler. Set `CROSS_COMPILE=`
 only when intentionally cross-compiling.
+
+If you pulled this branch before the 2026-06-25 build fix, update it first:
+
+```sh
+git pull --ff-only
+```
 
 ## Pre-Install Checks
 

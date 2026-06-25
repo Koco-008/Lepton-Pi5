@@ -3,9 +3,6 @@
 /dts-v1/;
 /plugin/;
 
-#include <dt-bindings/interrupt-controller/irq.h>
-#include <dt-bindings/pinctrl/bcm2835.h>
-
 / {
 	compatible = "brcm,bcm2835";
 
@@ -21,7 +18,7 @@
 		__overlay__ {
 			lepton_vsync_pin: lepton_vsync_pin {
 				brcm,pins = <17>;
-				brcm,function = <BCM2835_FSEL_GPIO_IN>;
+				brcm,function = <0>;
 				brcm,pull = <0>;
 			};
 		};
@@ -43,7 +40,7 @@
 				spi-cpha;
 				spi-cpol;
 				interrupt-parent = <&gpio>;
-				interrupts = <17 IRQ_TYPE_EDGE_RISING>;
+				interrupts = <17 1>;
 			};
 		};
 	};
