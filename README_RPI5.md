@@ -58,8 +58,7 @@ Build the module and overlay:
 ```sh
 cd lepton_module
 make clean
-make KDIR=/lib/modules/$(uname -r)/build
-make overlay
+make rpi5 KDIR=/lib/modules/$(uname -r)/build
 modinfo ./lepton.ko
 cd ..
 ```

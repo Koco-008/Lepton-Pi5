@@ -33,14 +33,21 @@ overlay_dst="/boot/firmware/overlays/flir-lepton-rpi5.dtbo"
 config="/boot/firmware/config.txt"
 
 [ -f "$module_src" ] || { echo "Missing $module_src. Build the module first." >&2; exit 1; }
-[ -f "$overlay_src" ] || { echo "Missing $overlay_src. Build the overlay first." >&2; exit 1; }
 [ -f "$config" ] || { echo "Missing $config." >&2; exit 1; }
+if [ ! -f "$overlay_src" ] && [ ! -f "$overlay_dst" ]; then
+	echo "Missing $overlay_src and no installed overlay at $overlay_dst. Build the overlay first." >&2
+	exit 1
+fi
 
 backup="$config.lepton-backup-$(date +%Y%m%d-%H%M%S)"
 
 run mkdir -p "/lib/modules/$kernel/extra"
 run cp "$module_src" "$module_dst"
-run cp "$overlay_src" "$overlay_dst"
+if [ -f "$overlay_src" ]; then
+	run cp "$overlay_src" "$overlay_dst"
+else
+	echo "Keeping existing $overlay_dst because $overlay_src is missing."
+fi
 run cp "$config" "$backup"
 
 if grep -q '^dtoverlay=flir-lepton-rpi5' "$config"; then
@@ -55,4 +62,4 @@ fi
 
 run depmod -a "$kernel"
 
-echo "Install staged. Reboot, then run tools/diagnose.sh."
+echo "Install staged. Reboot if the overlay changed; otherwise reload the module and run tools/diagnose.sh."

@@ -4,6 +4,8 @@ PWD := $(CURDIR)
 
 default: modules
 
+rpi5: modules overlay
+
 modules:
 	$(MAKE) -C $(KDIR) M="$(PWD)" modules
 
@@ -15,4 +17,4 @@ overlay: flir-lepton-rpi5.dtbo
 clean:
 	rm -f *.o *.a *.ko *.mod *.mod.c *.dtbo Module.symvers modules.order .*.cmd
 
-.PHONY: default modules overlay clean
+.PHONY: default rpi5 modules overlay clean
