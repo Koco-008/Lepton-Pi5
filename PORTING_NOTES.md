@@ -76,3 +76,13 @@ First target build on `6.18.34+rpt-rpi-2712` reached `flir_lepton.o` and found:
 - The standalone `dtc -@ -I dts` overlay build did not preprocess C-style
   `#include` directives; the Pi 5 overlay now uses numeric values for GPIO input
   function (`0`) and rising-edge IRQ (`1`) so it builds with plain `dtc`.
+
+After that fix, the target Pi built `lepton.ko`, built `flir-lepton-rpi5.dtbo`,
+and `modinfo ./lepton.ko` reported vermagic
+`6.18.34+rpt-rpi-2712 SMP preempt mod_unload modversions aarch64`.
+
+Remaining warning cleanup:
+
+- `get_subframe_index_from_subframe()` and `get_subframe_index()` are local
+  helpers in `lepton_vospi_funcs.c`; they are now `static` to remove
+  `-Wmissing-prototypes` warnings.

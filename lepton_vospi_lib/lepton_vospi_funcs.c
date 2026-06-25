@@ -100,7 +100,7 @@ int is_subframe_line_counter_valid(lepton_vospi_info *lep_info, unsigned short *
  * Given a pointer to 16-bit sub-frame data from a Lepton 3.x, collect the
  * embedded sub-frame index.
  */
-int get_subframe_index_from_subframe(unsigned short *subframe_data) {
+static int get_subframe_index_from_subframe(unsigned short *subframe_data) {
 	unsigned char *subframe_byte_base = NULL;
 	int subframe_index = 0;
 
@@ -119,7 +119,7 @@ int get_subframe_index_from_subframe(unsigned short *subframe_data) {
  * Always return 0 for Lepton 2.X. Return 0 for Lepton 3.X only for duplicate
  * frames.
  */
-int get_subframe_index(lepton_vospi_info *lep_info, unsigned short *subframe_data) {
+static int get_subframe_index(lepton_vospi_info *lep_info, unsigned short *subframe_data) {
 	int sidx = 0;
 
 	if (lep_info->lep_version != LEPTON_VERSION_2X) {
