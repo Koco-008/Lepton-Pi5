@@ -50,6 +50,8 @@ static int              out_buf;
 static char            *out_file_prefix = NULL;
 static int              force_format;
 static int              frame_count = 70;
+static int              debug_headers;
+static int              debug_headers_left;
 static telemetry_location telemetry_loc = TELEMETRY_OFF;
 
 static lepton_vospi_info lep_info;
@@ -72,6 +74,50 @@ static int xioctl(int fh, int request, void *arg)
         } while (-1 == r && EINTR == errno);
 
         return r;
+}
+
+static int peek_lepton3_subframe_index(const void *p)
+{
+        const unsigned char *base = p;
+        const unsigned char *line20 =
+                base + LEPTON3_SUBFRAME_INDEX_LINE1 * LEPTON_SUBFRAME_LINE_BYTE_WIDTH;
+        const unsigned char *line21 =
+                base + LEPTON3_SUBFRAME_INDEX_LINE2 * LEPTON_SUBFRAME_LINE_BYTE_WIDTH;
+        int sidx;
+
+        sidx = (line20[LEPTON3_SUBFRAME_INDEX_BYTE] &
+                LEPTON3_SUBFRAME_INDEX_LINE1_BYTE1_MASK) >> 4;
+        sidx |= (line21[LEPTON3_SUBFRAME_INDEX_BYTE] &
+                 LEPTON3_SUBFRAME_INDEX_LINE2_BYTE1_MASK) >> 1;
+
+        return sidx;
+}
+
+static void debug_rejected_subframe(const void *p)
+{
+        const unsigned char *base = p;
+        const unsigned char *line0 = base;
+        const unsigned char *line20 =
+                base + LEPTON3_SUBFRAME_INDEX_LINE1 * LEPTON_SUBFRAME_LINE_BYTE_WIDTH;
+        const unsigned char *line21 =
+                base + LEPTON3_SUBFRAME_INDEX_LINE2 * LEPTON_SUBFRAME_LINE_BYTE_WIDTH;
+        const unsigned char *line59 =
+                base + (LEPTON_SUBFRAME_DATA_LINE_HEIGHT - 1) *
+                       LEPTON_SUBFRAME_LINE_BYTE_WIDTH;
+
+        if (!debug_headers || debug_headers_left <= 0 || lep_version != LEPTON_VERSION_3X)
+                return;
+
+        fprintf(stderr,
+                "\nreject[%d]: expected=%u decoded=%d "
+                "l0=%02x%02x l20=%02x%02x l21=%02x%02x l59=%02x%02x\n",
+                subframe_number, lep_info.next_subframe_index,
+                peek_lepton3_subframe_index(p),
+                line0[0], line0[1],
+                line20[0], line20[1],
+                line21[0], line21[1],
+                line59[0], line59[1]);
+        debug_headers_left--;
 }
 
 static void process_image(const void *p, int size)
@@ -124,6 +170,7 @@ static void process_image(const void *p, int size)
                         /* indicate a throw-away frame, trying to sync on
                          * correct Lepton 3.x subframe.
                          */
+                        debug_rejected_subframe(p);
                         fflush(stderr);
                         fprintf(stderr, "-");
                 }
@@ -643,11 +690,12 @@ static void usage(FILE *fp, int argc, char **argv)
                  "-f | --format        Force format to 640x480 YUYV\n"
                  "-c | --count         Number of frames to grab [%i]\n"
                  "-t | --telemetry     Telemetry location: one of 'off', 'start', or 'end'\n"
+                 "-x | --debug-headers Print first rejected VoSPI packet headers\n"
                  "",
                  argv[0], dev_name, frame_count);
 }
 
-static const char short_options[] = "23d:hmruo:fc:t:";
+static const char short_options[] = "23d:hmruo:fc:t:x";
 
 static const struct option
 long_options[] = {
@@ -662,6 +710,7 @@ long_options[] = {
         { "format", no_argument,       NULL, 'f' },
         { "count",  required_argument, NULL, 'c' },
         { "telemetry", required_argument, NULL, 't' },
+        { "debug-headers", no_argument, NULL, 'x' },
         { 0, 0, 0, 0 }
 };
 
@@ -755,6 +804,11 @@ int main(int argc, char **argv)
                                 printf("Unknown telemetry location '%s'\n", optarg);
                                 exit(1);
                         }
+                        break;
+
+                case 'x':
+                        debug_headers = 1;
+                        debug_headers_left = 32;
                         break;
 
                 default:
