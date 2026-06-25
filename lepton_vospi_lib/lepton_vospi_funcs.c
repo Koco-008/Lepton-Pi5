@@ -96,6 +96,12 @@ int is_subframe_line_counter_valid(lepton_vospi_info *lep_info, unsigned short *
 	return valid;
 }
 
+int is_discard_packet(unsigned short *subframe_data) {
+	unsigned char *first_line = get_line_from_subframe(subframe_data, 0);
+
+	return (first_line[0] & 0x0f) == 0x0f;
+}
+
 /*
  * Given a pointer to 16-bit sub-frame data from a Lepton 3.x, collect the
  * embedded sub-frame index.
@@ -217,4 +223,5 @@ int extract_pixel_data(lepton_vospi_info *lep_info, unsigned short *received_fra
 EXPORT_SYMBOL(init_lepton_info);
 EXPORT_SYMBOL(get_line_from_subframe);
 EXPORT_SYMBOL(is_subframe_line_counter_valid);
+EXPORT_SYMBOL(is_discard_packet);
 #endif

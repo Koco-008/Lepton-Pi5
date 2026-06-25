@@ -74,6 +74,12 @@ unsigned char *get_line_from_subframe(unsigned short *subframe_data, int line_no
 int is_subframe_line_counter_valid(lepton_vospi_info *lep_info, unsigned short *subframe_data);
 
 /*
+ * Given a pointer to 16-bit sub-frame data, determine whether the first packet
+ * is a VoSPI discard packet.
+ */
+int is_discard_packet(unsigned short *subframe_data);
+
+/*
  * Given a lepton_vospi_info struct pointer, and a pointer to 16-bit sub-frame
  * data, check whether the subframe index (1-based) is valid.
  *

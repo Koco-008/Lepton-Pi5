@@ -22,4 +22,5 @@
 #define MINIMUM_SPI_TRANSFER_QUIET_TIME (1 * ONE_MS_IN_NS)
 // how many discards in a row can be received before giving up
 #define MAX_CONSEC_DISCARD_COUNT 120
-
+// how long to stop clocking VoSPI after discard packets
+#define LEPTON_RESYNC_DELAY_MS 300

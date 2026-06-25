@@ -427,6 +427,7 @@ static void lepton_spi_done_callback(void *context)
 	void *dst = NULL;
 	struct timespec64 now;
 	bool subframe_is_good = false;
+	bool discard_packet = false;
 	int status;
 
 	ktime_get_ts64(&now);
@@ -451,7 +452,8 @@ static void lepton_spi_done_callback(void *context)
 	 */
 	subframe_data = lep->spare_buf.rx_buf;
 	if (!status) {
-		subframe_is_good =
+		discard_packet = is_discard_packet(subframe_data);
+		subframe_is_good = !discard_packet &&
 			is_subframe_line_counter_valid(&lep->lep_vospi_info, subframe_data) &&
 			is_subframe_index_valid(&lep->lep_vospi_info, subframe_data);
 	}
@@ -468,11 +470,11 @@ static void lepton_spi_done_callback(void *context)
 		lep->synced = false;
 		lep->discard_count++;
 		lep->invalid_subframe_count++;
-		if (lep->discard_count >= MAX_CONSEC_DISCARD_COUNT) {
+		if (discard_packet || lep->discard_count >= MAX_CONSEC_DISCARD_COUNT) {
 			lep->lep_vospi_info.next_subframe_index = 1;
 			lep->discard_count = 0;
 			lep->resync_count++;
-			lep->resync_resume = ktime_add_ms(ktime_get(), 200);
+			lep->resync_resume = ktime_add_ms(ktime_get(), LEPTON_RESYNC_DELAY_MS);
 		}
 	}
 
