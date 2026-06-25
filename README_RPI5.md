@@ -61,13 +61,18 @@ make clean
 make KDIR=/lib/modules/$(uname -r)/build
 make overlay
 modinfo ./lepton.ko
+cd ..
 ```
 
 Build the userspace VSYNC helper and collector:
 
 ```sh
-make clean
-make
+make -C lepton_sdk clean
+make -C lepton_control clean
+make -C lepton_data_collector clean
+make -C lepton_sdk
+make -C lepton_control
+make -C lepton_data_collector
 ```
 
 The top-level Makefile defaults to the native compiler. Set `CROSS_COMPILE=`
@@ -130,7 +135,15 @@ Expected:
 Enable Lepton VSYNC over I2C before capture tests:
 
 ```sh
-sudo lepton_control/rpi_vsync_app
+sudo ./lepton_control/rpi_vsync_app
+```
+
+Expected output includes `LEP_SetOemGpioMode result = 0`. If the helper is
+missing, rebuild it from the repository root:
+
+```sh
+make -C lepton_sdk
+make -C lepton_control
 ```
 
 ## Diagnostics

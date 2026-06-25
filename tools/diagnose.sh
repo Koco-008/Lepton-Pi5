@@ -73,6 +73,15 @@ else
 	echo "i2cdetect not found"
 fi
 
+echo "== userspace helpers =="
+for helper in ./lepton_control/rpi_vsync_app ./lepton_data_collector/lepton_data_collector; do
+	if [ -x "$helper" ]; then
+		echo "$helper: present"
+	else
+		echo "$helper: missing or not executable"
+	fi
+done
+
 echo "== lepton modinfo =="
 if command -v modinfo >/dev/null 2>&1; then
 	modinfo lepton 2>/dev/null || modinfo ./lepton_module/lepton.ko 2>/dev/null || true
