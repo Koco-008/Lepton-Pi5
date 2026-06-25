@@ -188,6 +188,8 @@ static int read_frame(void)
                         fflush(stderr);
                         fprintf(stderr, "!");
                         fflush(stdout);
+                        if (-1 == xioctl(fd, VIDIOC_QBUF, &buf))
+                                errno_exit("VIDIOC_QBUF");
                         return 0;
                 }
 
