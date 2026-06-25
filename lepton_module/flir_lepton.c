@@ -620,10 +620,11 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-	/* If video is synced and there are V4L buffers available,
-	 * take the first one to fill with data
+	/* If streaming is active and there are V4L buffers available, attach the
+	 * next buffer to this transfer. Validation happens after the SPI transfer,
+	 * so this also preserves the first valid subframe after a resync pause.
 	 */
-	if (lep->started && lep->synced && !list_empty(&lep->unfilled_bufs)) {
+	if (lep->started && !list_empty(&lep->unfilled_bufs)) {
 		lep_buf = list_first_entry(&lep->unfilled_bufs, struct lepton_buffer, list);
 		list_del(&lep_buf->list);
 		lep->current_lep_buf = lep_buf;
