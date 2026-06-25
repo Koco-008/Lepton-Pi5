@@ -10,6 +10,7 @@
 #include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/ktime.h>
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
@@ -696,20 +697,36 @@ static lepton_version lepton_dt_version(struct spi_device *spi)
 	return model == FLIR_LEPTON3 ? LEPTON_VERSION_3X : LEPTON_VERSION_2X;
 }
 
-static unsigned long lepton_irq_flags(struct device *dev)
+static unsigned int lepton_irq_type(struct device *dev)
 {
 	if (!vsync_edge || strcmp(vsync_edge, "dt") == 0)
 		return 0;
 	if (strcmp(vsync_edge, "rising") == 0)
-		return IRQF_TRIGGER_RISING;
+		return IRQ_TYPE_EDGE_RISING;
 	if (strcmp(vsync_edge, "falling") == 0)
-		return IRQF_TRIGGER_FALLING;
+		return IRQ_TYPE_EDGE_FALLING;
 	if (strcmp(vsync_edge, "both") == 0)
-		return IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING;
+		return IRQ_TYPE_EDGE_BOTH;
 
 	dev_warn(dev, "invalid vsync_edge=%s, using device tree IRQ flags\n",
 		 vsync_edge);
 	return 0;
+}
+
+static int lepton_configure_irq_type(struct device *dev, unsigned int irq)
+{
+	unsigned int irq_type = lepton_irq_type(dev);
+	int ret;
+
+	if (!irq_type)
+		return 0;
+
+	ret = irq_set_irq_type(irq, irq_type);
+	if (ret)
+		dev_err(dev, "failed to set vsync_edge=%s irq type: %d\n",
+			vsync_edge, ret);
+
+	return ret;
 }
 
 #define LEPTON_COUNTER_ATTR(_name, _field, _fmt)			\
@@ -900,14 +917,19 @@ static int lepton_probe(struct spi_device *spi)
 	 */
 
 	irq = irq_of_parse_and_map(of_node, 0);
-	if (irq < 0) {
+	if (irq <= 0) {
 		dev_err(dev, "failed to map irq");
+		ret = irq ? irq : -EINVAL;
 		goto unreg_video_and_v4l_device;
 	}
 	lep->irq = irq;
 
-	ret = devm_request_irq(dev, irq, lepton_vsync_handler,
-			       lepton_irq_flags(dev), dev_name(dev), spi);
+	ret = lepton_configure_irq_type(dev, irq);
+	if (ret)
+		goto unreg_video_and_v4l_device;
+
+	ret = devm_request_irq(dev, irq, lepton_vsync_handler, 0,
+			       dev_name(dev), spi);
 	if (ret) {
 		dev_err(dev, "failed to register irq");
 		goto unreg_video_and_v4l_device;
