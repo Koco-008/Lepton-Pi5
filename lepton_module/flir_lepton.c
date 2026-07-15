@@ -438,6 +438,7 @@ static void lepton_spi_done_callback(void *context)
 	struct timespec64 now;
 	bool subframe_is_good = false;
 	bool discard_packet = false;
+	bool lost_sync;
 	int status;
 
 	ktime_get_ts64(&now);
@@ -475,12 +476,18 @@ static void lepton_spi_done_callback(void *context)
 		lep->valid_subframe_count++;
 	}
 	else {
-		if (lep->synced)
+		lost_sync = lep->synced;
+		if (lost_sync)
 			lep->sync_loss_count++;
 		lep->synced = false;
 		lep->discard_count++;
 		lep->invalid_subframe_count++;
-		if (discard_packet || lep->discard_count >= MAX_CONSEC_DISCARD_COUNT) {
+		/* Discard packets are expected while acquiring VoSPI sync. Keep
+		 * clocking them out so the extra-line reads can reach packet zero.
+		 * Pause only after losing an established sync or exhausting the
+		 * acquisition window.
+		 */
+		if (lost_sync || lep->discard_count >= MAX_CONSEC_DISCARD_COUNT) {
 			lep->lep_vospi_info.next_subframe_index = 1;
 			lep->discard_count = 0;
 			lep->resync_count++;

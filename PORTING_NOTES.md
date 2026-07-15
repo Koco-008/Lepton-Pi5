@@ -108,3 +108,9 @@ v4l2loopback 0.15 can lose capture-only state before the first queued frame.
 This keeps format negotiation stable without publishing a placeholder raw
 frame. Successful camera output is not claimed while the physical camera
 continues to return only discard or zero packets.
+
+The kernel driver's VoSPI acquisition path continues clocking initial discard
+packets instead of starting a new quiet-time resync after each one. A quiet-time
+resync is now reserved for loss of an established sync or 120 consecutive
+invalid acquisition transfers. This avoids a loop with one transfer every
+300 ms that can never progress beyond the Lepton's initial discard packets.

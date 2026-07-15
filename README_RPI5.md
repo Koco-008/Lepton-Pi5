@@ -185,9 +185,16 @@ The driver exposes read-only counters on the SPI device sysfs directory:
 
 Use `tools/diagnose.sh` to collect the common state without secrets.
 
-If capture returns only discard packets such as `2fff` or `5fff`, reboot once
-to clear any latched Lepton or GPIO IRQ state, then test a small delay between
-VSYNC and the SPI read:
+Discard packets such as `2fff` or `5fff` can occur while VoSPI synchronization
+is being acquired. The driver must continue clocking during this phase; a
+`spi_complete_count` that advances only about three times per second while
+`vsync_count` advances about 100 times per second indicates an outdated driver
+that pauses after every discard packet. Rebuild and reinstall the current
+module before changing timing parameters.
+
+Use the overlay default of 20 MHz first. If the current driver still returns
+only discard packets, reboot once to clear any latched Lepton or GPIO IRQ state,
+then test a small delay between VSYNC and the SPI read:
 
 ```sh
 sudo reboot
@@ -201,7 +208,8 @@ If `500` still returns only discard packets, retry with `1000`, `1500`, and
 `2000`. Keep this value below the interval where SPI reads start overlapping
 the next VSYNC.
 
-If all delay values still return discard packets, test lower SPI speeds:
+If all delay values still return discard packets, test lower SPI speeds only as
+a signal-integrity diagnostic:
 
 ```sh
 sudo modprobe -r lepton
