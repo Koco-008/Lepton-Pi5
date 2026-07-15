@@ -44,6 +44,20 @@ run() {
 	fi
 }
 
+verify_capture_format() {
+	device=$1
+	attempt=0
+
+	while [ "$attempt" -lt 50 ]; do
+		if v4l2-ctl -d "$device" --get-fmt-video >/dev/null 2>&1; then
+			return 0
+		fi
+		attempt=$((attempt + 1))
+		sleep 0.1
+	done
+	return 1
+}
+
 if [ "$dry_run" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
 	echo "Run as root, or use --dry-run." >&2
 	exit 1
@@ -109,7 +123,7 @@ if [ "$dry_run" -eq 1 ]; then
 	echo "DRY-RUN: write v4l2loopback to $modules_load_config"
 else
 	printf '%s\n' \
-		'options v4l2loopback devices=2 video_nr=10,11 card_label="FLIR Lepton Raw,FLIR Lepton False Color" exclusive_caps=1,1 max_buffers=4' \
+		'options v4l2loopback devices=2 video_nr=10,11 card_label="FLIR Lepton Raw,FLIR Lepton False Color" exclusive_caps=0,0 max_buffers=4' \
 		> "$modprobe_config"
 	printf '%s\n' 'v4l2loopback' > "$modules_load_config"
 fi
@@ -147,6 +161,20 @@ fi
 
 run systemctl daemon-reload
 run systemctl enable --now lepton-streamer.service
+
+if [ "$dry_run" -eq 1 ]; then
+	echo "DRY-RUN: verify capture formats on /dev/video10 and /dev/video11"
+elif command -v v4l2-ctl >/dev/null 2>&1; then
+	for device in /dev/video10 /dev/video11; do
+		if ! verify_capture_format "$device"; then
+			echo "$device did not expose a capture format after service startup." >&2
+			echo "Inspect: journalctl -u lepton-streamer.service -n 100 --no-pager" >&2
+			exit 1
+		fi
+	done
+else
+	echo "Warning: v4l2-ctl is unavailable; public capture formats were not verified." >&2
+fi
 
 echo "Installed Lepton streams:"
 echo "  /dev/video10  160x120 Y16 raw pixels"

@@ -97,8 +97,10 @@ sudo tools/install_streams_rpi5.sh
 ```
 
 The service owns `/dev/video0`; applications should use `/dev/video10` or
-`/dev/video11`. Full architecture, Python usage, diagnostics, and uninstall
-steps are documented in [docs/VideoStreams.md](docs/VideoStreams.md).
+`/dev/video11`. Both public nodes use v4l2loopback's compatibility mode so their
+formats remain queryable before the first valid camera frame. Full architecture,
+Python usage, diagnostics, and uninstall steps are documented in
+[docs/VideoStreams.md](docs/VideoStreams.md).
 
 If you pulled this branch before the 2026-06-25 build fix, update it first:
 

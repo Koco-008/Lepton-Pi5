@@ -103,7 +103,8 @@ out of kernel context:
   unit, diagnostics, and an end-to-end stream test.
 
 The synthetic unit tests and real target compilation pass on the Raspberry Pi.
-Both loopback output queues enter `STREAMON` before data is queued, so capture
-applications can discover both devices before the first valid frame without a
-placeholder raw frame. Successful camera output is not claimed while the
-physical camera continues to return only discard or zero packets.
+The public loopback nodes use `exclusive_caps=0`, because Debian Trixie's
+v4l2loopback 0.15 can lose capture-only state before the first queued frame.
+This keeps format negotiation stable without publishing a placeholder raw
+frame. Successful camera output is not claimed while the physical camera
+continues to return only discard or zero packets.

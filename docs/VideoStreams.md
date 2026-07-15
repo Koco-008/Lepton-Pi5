@@ -15,10 +15,14 @@ segments 1 through 4, strips the four VoSPI header/CRC bytes from every line,
 and corrects the SPI byte order. It publishes a frame only after all four
 segments are valid.
 
-The streamer starts both loopback output queues before it reads the camera, so
-both public devices are immediately discoverable as capture devices even before
-the first valid camera frame. It does not enqueue placeholder raw data while the
-input is invalid.
+The loopback devices intentionally advertise capture and output capabilities
+(`exclusive_caps=0`). Debian Trixie's v4l2loopback 0.15 can otherwise drop its
+capture-only state before the first queued frame, making `VIDIOC_G_FMT` fail
+with `EINVAL`. This compatibility mode keeps both public formats queryable by
+OpenCV and `v4l2-ctl` while the camera is not yet producing valid data. The
+streamer still does not enqueue placeholder raw data while the input is invalid.
+When `v4l2-ctl` is installed, the installer verifies both capture views after
+starting the service and fails if either format cannot be queried.
 
 ## False-Color Mapping
 
