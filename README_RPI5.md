@@ -212,6 +212,13 @@ sudo ./lepton_control/rpi_vsync_app
 Then retry with `12000000`, `16000000`, and `18000000`. The overlay default is
 `20000000`.
 
+Stop changing timing parameters if `last_spi_status` is `0` but
+`valid_subframe_count` remains `0` and the sampled packet headers are uniformly
+`0000`. The SPI controller completed its transactions, but the Lepton did not
+return usable bits. Fully power off both the Pi and Lepton, then verify MISO,
+CE0/GPIO8, ground, supply, and short signal wiring. Working I2C control and
+VSYNC interrupts do not validate the independent VoSPI data path.
+
 ## Capture Validation
 
 Use the existing collector for full Lepton 3.x frames:

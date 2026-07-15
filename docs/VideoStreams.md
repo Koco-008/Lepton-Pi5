@@ -97,8 +97,11 @@ public stream and verify its exact size:
 tools/test_streams_rpi5.sh
 ```
 
-The test waits up to 15 seconds for each stream. It fails rather than accepting
-a stale, partial, or incorrectly sized frame.
+The test first validates both exact public formats and checks the kernel driver's
+`valid_subframe_count`. It stops with the SPI counters when that value is zero,
+because no public frame can exist yet. Otherwise it waits up to 15 seconds for
+each stream and fails rather than accepting a stale, partial, or incorrectly
+sized frame.
 
 ## Python GUI
 

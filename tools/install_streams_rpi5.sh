@@ -46,10 +46,15 @@ run() {
 
 verify_capture_format() {
 	device=$1
+	expected_dimensions=$2
+	expected_pixel_format=$3
 	attempt=0
 
 	while [ "$attempt" -lt 50 ]; do
-		if v4l2-ctl -d "$device" --get-fmt-video >/dev/null 2>&1; then
+		format=$(v4l2-ctl -d "$device" --get-fmt-video 2>/dev/null || true)
+		if printf '%s\n' "$format" |
+			grep -Eq "Width/Height[[:space:]]*:[[:space:]]*$expected_dimensions$" &&
+			printf '%s\n' "$format" | grep -Fq "'$expected_pixel_format'"; then
 			return 0
 		fi
 		attempt=$((attempt + 1))
@@ -165,13 +170,16 @@ run systemctl enable --now lepton-streamer.service
 if [ "$dry_run" -eq 1 ]; then
 	echo "DRY-RUN: verify capture formats on /dev/video10 and /dev/video11"
 elif command -v v4l2-ctl >/dev/null 2>&1; then
-	for device in /dev/video10 /dev/video11; do
-		if ! verify_capture_format "$device"; then
-			echo "$device did not expose a capture format after service startup." >&2
-			echo "Inspect: journalctl -u lepton-streamer.service -n 100 --no-pager" >&2
-			exit 1
-		fi
-	done
+	if ! verify_capture_format /dev/video10 160/120 "Y16 "; then
+		echo "/dev/video10 did not expose the expected 160x120 Y16 capture format." >&2
+		v4l2-ctl -d /dev/video10 --get-fmt-video >&2 || true
+		exit 1
+	fi
+	if ! verify_capture_format /dev/video11 640/480 YUYV; then
+		echo "/dev/video11 did not expose the expected 640x480 YUYV capture format." >&2
+		v4l2-ctl -d /dev/video11 --get-fmt-video >&2 || true
+		exit 1
+	fi
 else
 	echo "Warning: v4l2-ctl is unavailable; public capture formats were not verified." >&2
 fi
