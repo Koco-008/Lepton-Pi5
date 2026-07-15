@@ -15,6 +15,11 @@ segments 1 through 4, strips the four VoSPI header/CRC bytes from every line,
 and corrects the SPI byte order. It publishes a frame only after all four
 segments are valid.
 
+The streamer starts both loopback output queues before it reads the camera, so
+both public devices are immediately discoverable as capture devices even before
+the first valid camera frame. It does not enqueue placeholder raw data while the
+input is invalid.
+
 ## False-Color Mapping
 
 Every completed 160x120 frame is scaled independently:
@@ -123,8 +128,8 @@ journalctl -u lepton-streamer.service -f
 ```
 
 This means the service can be installed before the current hardware issue is
-fixed, but `/dev/video10` and `/dev/video11` will not advance until valid
-segments 1, 2, 3, and 4 are received.
+fixed. Their formats remain queryable, but reads wait and the devices do not
+advance until valid segments 1, 2, 3, and 4 are received.
 
 Stop the service before unloading or manually testing the Lepton kernel module,
 because the service intentionally keeps `/dev/video0` open:

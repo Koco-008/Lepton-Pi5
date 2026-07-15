@@ -109,7 +109,7 @@ if [ "$dry_run" -eq 1 ]; then
 	echo "DRY-RUN: write v4l2loopback to $modules_load_config"
 else
 	printf '%s\n' \
-		'options v4l2loopback devices=2 video_nr=10,11 card_label="FLIR Lepton Raw","FLIR Lepton False Color" exclusive_caps=1,1 max_buffers=4' \
+		'options v4l2loopback devices=2 video_nr=10,11 card_label="FLIR Lepton Raw,FLIR Lepton False Color" exclusive_caps=1,1 max_buffers=4' \
 		> "$modprobe_config"
 	printf '%s\n' 'v4l2loopback' > "$modules_load_config"
 fi
@@ -133,6 +133,16 @@ else
 			exit 1
 		}
 	done
+	raw_label=$(cat /sys/class/video4linux/video10/name)
+	color_label=$(cat /sys/class/video4linux/video11/name)
+	[ "$raw_label" = "FLIR Lepton Raw" ] || {
+		echo "Unexpected /dev/video10 label: $raw_label" >&2
+		exit 1
+	}
+	[ "$color_label" = "FLIR Lepton False Color" ] || {
+		echo "Unexpected /dev/video11 label: $color_label" >&2
+		exit 1
+	}
 fi
 
 run systemctl daemon-reload
