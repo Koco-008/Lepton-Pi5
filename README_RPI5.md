@@ -63,19 +63,42 @@ modinfo ./lepton.ko
 cd ..
 ```
 
-Build the userspace VSYNC helper and collector:
+Build the userspace VSYNC helper, collector, and dual-stream service:
 
 ```sh
 make -C lepton_sdk clean
 make -C lepton_control clean
 make -C lepton_data_collector clean
+make -C lepton_streamer clean
 make -C lepton_sdk
 make -C lepton_control
 make -C lepton_data_collector
+make -C lepton_streamer
+make -C lepton_streamer check
 ```
 
 The top-level Makefile defaults to the native compiler. Set `CROSS_COMPILE=`
 only when intentionally cross-compiling.
+
+## Raw and False-Color Video Streams
+
+After the base kernel driver is installed, the stream service creates two
+application-facing V4L2 devices:
+
+- `/dev/video10`: complete 160x120 little-endian `Y16` raw frames;
+- `/dev/video11`: 640x480 `YUYV` false-color frames with per-frame min/max
+  scaling from blue (coldest raw value) to red (hottest raw value).
+
+Install and start the service:
+
+```sh
+sudo tools/install_streams_rpi5.sh --dry-run
+sudo tools/install_streams_rpi5.sh
+```
+
+The service owns `/dev/video0`; applications should use `/dev/video10` or
+`/dev/video11`. Full architecture, Python usage, diagnostics, and uninstall
+steps are documented in [docs/VideoStreams.md](docs/VideoStreams.md).
 
 If you pulled this branch before the 2026-06-25 build fix, update it first:
 

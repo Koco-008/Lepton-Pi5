@@ -49,7 +49,22 @@ ls -l /dev/spidev* 2>/dev/null || true
 ls -l /dev/video* 2>/dev/null || true
 
 echo "== relevant modules =="
-lsmod | grep -E '(^lepton|spi|videobuf2|v4l2|dw_spi)' || true
+lsmod | grep -E '(^lepton|v4l2loopback|spi|videobuf2|v4l2|dw_spi)' || true
+
+echo "== processed stream service =="
+if command -v systemctl >/dev/null 2>&1; then
+	systemctl --no-pager --full status lepton-streamer.service 2>/dev/null || true
+fi
+
+echo "== processed stream formats =="
+if command -v v4l2-ctl >/dev/null 2>&1; then
+	for dev in /dev/video10 /dev/video11; do
+		if [ -c "$dev" ]; then
+			echo "-- $dev"
+			v4l2-ctl -d "$dev" --all 2>/dev/null || true
+		fi
+	done
+fi
 
 echo "== dtoverlay =="
 if command -v dtoverlay >/dev/null 2>&1; then

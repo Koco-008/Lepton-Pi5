@@ -106,9 +106,9 @@ int is_discard_packet(unsigned short *subframe_data) {
  * Given a pointer to 16-bit sub-frame data from a Lepton 3.x, collect the
  * embedded sub-frame index.
  */
-static int get_subframe_index_from_subframe(unsigned short *subframe_data) {
+static unsigned int get_subframe_index_from_subframe(unsigned short *subframe_data) {
 	unsigned char *subframe_byte_base = NULL;
-	int subframe_index = 0;
+	unsigned int subframe_index = 0;
 
 	subframe_byte_base = get_line_from_subframe(subframe_data, LEPTON3_SUBFRAME_INDEX_LINE1);
 	subframe_index = (subframe_byte_base[LEPTON3_SUBFRAME_INDEX_BYTE] & LEPTON3_SUBFRAME_INDEX_LINE1_BYTE1_MASK) >> 4;
@@ -125,8 +125,8 @@ static int get_subframe_index_from_subframe(unsigned short *subframe_data) {
  * Always return 0 for Lepton 2.X. Return 0 for Lepton 3.X only for duplicate
  * frames.
  */
-static int get_subframe_index(lepton_vospi_info *lep_info, unsigned short *subframe_data) {
-	int sidx = 0;
+static unsigned int get_subframe_index(lepton_vospi_info *lep_info, unsigned short *subframe_data) {
+	unsigned int sidx = 0;
 
 	if (lep_info->lep_version != LEPTON_VERSION_2X) {
 		sidx = get_subframe_index_from_subframe(subframe_data);
@@ -136,7 +136,7 @@ static int get_subframe_index(lepton_vospi_info *lep_info, unsigned short *subfr
 
 int is_subframe_index_valid(lepton_vospi_info *lep_info, unsigned short *subframe_data) {
 	int valid = 0;
-	int sidx = 0;
+	unsigned int sidx = 0;
 
 	sidx = get_subframe_index(lep_info, subframe_data);
 	if (sidx == lep_info->next_subframe_index) {

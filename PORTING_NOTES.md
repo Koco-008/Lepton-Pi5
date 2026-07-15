@@ -86,3 +86,22 @@ Remaining warning cleanup:
 - `get_subframe_index_from_subframe()` and `get_subframe_index()` are local
   helpers in `lepton_vospi_funcs.c`; they are now `static` to remove
   `-Wmissing-prototypes` warnings.
+
+## 2026-07-15 Dual V4L2 Stream Pipeline
+
+Added a userspace stream service that keeps packet parsing and color conversion
+out of kernel context:
+
+- consumes the kernel driver's 82x60 raw VoSPI transport on `/dev/video0`;
+- validates packet IDs and Lepton 3 segment order;
+- assembles complete 160x120 frames and converts big-endian VoSPI samples to
+  little-endian V4L2 `Y16`;
+- publishes full raw frames through `/dev/video10`;
+- performs exact per-frame min/max scaling and publishes 640x480 YUYV
+  false-color frames through `/dev/video11`;
+- includes synthetic frame/palette tests, v4l2loopback installation, a systemd
+  unit, diagnostics, and an end-to-end stream test.
+
+The synthetic unit tests and real target compilation still need to be run on
+the Raspberry Pi. Successful output is not claimed while the physical camera
+continues to return only discard or zero packets.
