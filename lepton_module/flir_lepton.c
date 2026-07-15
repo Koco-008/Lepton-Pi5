@@ -70,6 +70,7 @@ struct lepton {
 	u64 vsync_count;
 	u64 spi_complete_count;
 	u64 valid_subframe_count;
+	u64 zero_segment_count;
 	u64 invalid_subframe_count;
 	u64 sync_loss_count;
 	u64 resync_count;
@@ -438,6 +439,8 @@ static void lepton_spi_done_callback(void *context)
 	struct timespec64 now;
 	bool subframe_is_good = false;
 	bool discard_packet = false;
+	bool line_counter_valid = false;
+	bool zero_segment = false;
 	bool lost_sync;
 	int status;
 
@@ -464,9 +467,16 @@ static void lepton_spi_done_callback(void *context)
 	subframe_data = lep->spare_buf.rx_buf;
 	if (!status) {
 		discard_packet = is_discard_packet(subframe_data);
-		subframe_is_good = !discard_packet &&
-			is_subframe_line_counter_valid(&lep->lep_vospi_info, subframe_data) &&
-			is_subframe_index_valid(&lep->lep_vospi_info, subframe_data);
+		line_counter_valid = !discard_packet &&
+			is_subframe_line_counter_valid(&lep->lep_vospi_info,
+						       subframe_data);
+		zero_segment = line_counter_valid &&
+			lep->lep_vospi_info.lep_version == LEPTON_VERSION_3X &&
+			lepton_get_subframe_index(&lep->lep_vospi_info,
+						   subframe_data) == 0;
+		if (line_counter_valid && !zero_segment)
+			subframe_is_good = is_subframe_index_valid(
+				&lep->lep_vospi_info, subframe_data);
 	}
 
 	spin_lock_irqsave(&lep->lock, flags);
@@ -474,6 +484,16 @@ static void lepton_spi_done_callback(void *context)
 		lep->synced = true;
 		lep->discard_count = 0;
 		lep->valid_subframe_count++;
+	}
+	else if (zero_segment) {
+		/* Lepton 3 emits two packet-aligned partial frames with segment
+		 * number zero after each unique frame. They must be clocked out to
+		 * maintain VoSPI synchronization but contain no publishable image.
+		 */
+		lep->synced = true;
+		lep->discard_count = 0;
+		lep->zero_segment_count++;
+		lep->lep_vospi_info.next_subframe_index = 1;
 	}
 	else {
 		lost_sync = lep->synced;
@@ -725,6 +745,7 @@ static DEVICE_ATTR_RO(_name)
 LEPTON_COUNTER_ATTR(vsync_count, vsync_count, "%llu");
 LEPTON_COUNTER_ATTR(spi_complete_count, spi_complete_count, "%llu");
 LEPTON_COUNTER_ATTR(valid_subframe_count, valid_subframe_count, "%llu");
+LEPTON_COUNTER_ATTR(zero_segment_count, zero_segment_count, "%llu");
 LEPTON_COUNTER_ATTR(invalid_subframe_count, invalid_subframe_count, "%llu");
 LEPTON_COUNTER_ATTR(sync_loss_count, sync_loss_count, "%llu");
 LEPTON_COUNTER_ATTR(resync_count, resync_count, "%llu");
@@ -735,6 +756,7 @@ static struct attribute *lepton_attrs[] = {
 	&dev_attr_vsync_count.attr,
 	&dev_attr_spi_complete_count.attr,
 	&dev_attr_valid_subframe_count.attr,
+	&dev_attr_zero_segment_count.attr,
 	&dev_attr_invalid_subframe_count.attr,
 	&dev_attr_sync_loss_count.attr,
 	&dev_attr_resync_count.attr,

@@ -177,6 +177,7 @@ The driver exposes read-only counters on the SPI device sysfs directory:
 - `vsync_count`
 - `spi_complete_count`
 - `valid_subframe_count`
+- `zero_segment_count`
 - `invalid_subframe_count`
 - `sync_loss_count`
 - `resync_count`
@@ -191,6 +192,13 @@ is being acquired. The driver must continue clocking during this phase; a
 `vsync_count` advances about 100 times per second indicates an outdated driver
 that pauses after every discard packet. Rebuild and reinstall the current
 module before changing timing parameters.
+
+For Lepton 3.x, `zero_segment_count` normally advances twice as fast as
+`valid_subframe_count`. FLIR deliberately inserts two partial frames, eight
+zero-numbered segments, after every unique four-segment frame. These segments
+must be read to maintain synchronization but are not publishable images. This
+cadence is specified in section 4.2.3.3 of the
+[Lepton Product Datasheet Rev 400](https://flir.netx.net/file/asset/13333/original/attachment).
 
 Use the overlay default of 20 MHz first. If the current driver still returns
 only discard packets, reboot once to clear any latched Lepton or GPIO IRQ state,

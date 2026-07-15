@@ -30,8 +30,8 @@ Changes made in this pass:
   - Added transfer overlap protection with `transfer_in_flight`.
   - Added read-only sysfs diagnostics on the SPI device:
     `vsync_count`, `spi_complete_count`, `valid_subframe_count`,
-    `invalid_subframe_count`, `sync_loss_count`, `last_spi_status`,
-    `transfer_in_flight`.
+    `zero_segment_count`, `invalid_subframe_count`, `sync_loss_count`,
+    `last_spi_status`, `transfer_in_flight`.
   - Selected Lepton 2.x/3.x VoSPI dimensions from the Device Tree compatible
     data. The Pi 5 overlay binds as `flir,lepton3`.
 
@@ -114,3 +114,7 @@ packets instead of starting a new quiet-time resync after each one. A quiet-time
 resync is now reserved for loss of an established sync or 120 consecutive
 invalid acquisition transfers. This avoids a loop with one transfer every
 300 ms that can never progress beyond the Lepton's initial discard packets.
+Packet-aligned Lepton 3 segments with index zero are now kept synchronized and
+counted separately instead of forcing a quiet-time resync. The userspace
+streamer likewise skips the documented eight zero segments between unique
+frames without logging them as transport failures.

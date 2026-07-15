@@ -58,7 +58,8 @@ if [ -r "$counter_directory/valid_subframe_count" ] &&
 	[ "$(cat "$counter_directory/valid_subframe_count")" -eq 0 ]; then
 	echo "FAIL: the Lepton driver has received no valid VoSPI subframes." >&2
 	for attribute in vsync_count spi_complete_count valid_subframe_count \
-		invalid_subframe_count sync_loss_count resync_count last_spi_status; do
+		zero_segment_count invalid_subframe_count sync_loss_count resync_count \
+		last_spi_status; do
 		if [ -r "$counter_directory/$attribute" ]; then
 			printf '%s=%s\n' "$attribute" "$(cat "$counter_directory/$attribute")" >&2
 		fi

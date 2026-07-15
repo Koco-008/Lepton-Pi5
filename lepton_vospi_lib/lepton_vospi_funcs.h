@@ -80,6 +80,14 @@ int is_subframe_line_counter_valid(lepton_vospi_info *lep_info, unsigned short *
 int is_discard_packet(unsigned short *subframe_data);
 
 /*
+ * Return the Lepton 3.x segment index encoded in the packet headers. A zero
+ * index identifies one of the partial invalid frames between unique frames.
+ * Lepton 2.x always returns zero.
+ */
+unsigned int lepton_get_subframe_index(lepton_vospi_info *lep_info,
+				       unsigned short *subframe_data);
+
+/*
  * Given a lepton_vospi_info struct pointer, and a pointer to 16-bit sub-frame
  * data, check whether the subframe index (1-based) is valid.
  *

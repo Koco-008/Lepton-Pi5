@@ -896,9 +896,10 @@ static int run_streamer(const struct options *options)
 		if (!options->quiet &&
 		    monotonic_milliseconds() - last_status_ms >= 2000U) {
 			fprintf(stderr,
-				"frames=%llu accepted=%llu rejected=%llu min=%u max=%u\n",
+				"frames=%llu accepted=%llu skipped=%llu rejected=%llu min=%u max=%u\n",
 				(unsigned long long)published_frames,
 				(unsigned long long)assembler.accepted_subframes,
+				(unsigned long long)assembler.skipped_subframes,
 				(unsigned long long)assembler.rejected_subframes,
 				range.minimum, range.maximum);
 			last_status_ms = monotonic_milliseconds();

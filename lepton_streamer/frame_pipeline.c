@@ -66,6 +66,17 @@ enum lepton_assemble_result lepton_frame_assembler_push(
 		goto reject;
 	}
 
+	if (lepton_get_subframe_index(
+			&assembler->vospi,
+			(unsigned short *)(uintptr_t)subframe) == 0) {
+		/* Lepton 3 emits eight zero-numbered segments after every unique
+		 * four-segment frame. They are protocol cadence, not sync errors.
+		 */
+		reset_segment_sequence(assembler);
+		assembler->skipped_subframes++;
+		return LEPTON_ASSEMBLE_SKIPPED;
+	}
+
 	if (!is_subframe_index_valid(&assembler->vospi,
 					     (unsigned short *)(uintptr_t)subframe)) {
 		assembler->last_reject = LEPTON_REJECT_SEGMENT;

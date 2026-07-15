@@ -36,8 +36,9 @@ static void make_subframe(unsigned int segment, uint8_t *subframe)
 
 		for (pixel_index = 0; pixel_index < LEPTON_SUBFRAME_LINE_PIXEL_WIDTH;
 		     pixel_index++) {
+			unsigned int image_segment = segment == 0 ? 0 : segment - 1U;
 			unsigned int logical_index =
-				(segment - 1U) *
+				image_segment *
 					(LEPTON_SUBFRAME_DATA_LINE_HEIGHT / 2U) *
 					LEPTON_FRAME_WIDTH +
 				(unsigned int)line_index *
@@ -77,6 +78,43 @@ static void test_complete_frame(void)
 	CHECK(assembler.accepted_subframes == 4);
 	CHECK(assembler.rejected_subframes == 0);
 	CHECK(assembler.completed_frames == 1);
+}
+
+static void test_invalid_frame_cadence(void)
+{
+	struct lepton_frame_assembler assembler;
+	uint8_t subframe[LEPTON_SUBFRAME_SIZE];
+	uint16_t frame[LEPTON_FRAME_PIXELS];
+	unsigned int segment;
+	unsigned int zero_segment;
+
+	lepton_frame_assembler_init(&assembler);
+	for (segment = 1; segment <= LEPTON3_SUBFRAME_COUNT; segment++) {
+		make_subframe(segment, subframe);
+		CHECK(lepton_frame_assembler_push(
+			&assembler, subframe, sizeof(subframe), frame) ==
+			(segment == LEPTON3_SUBFRAME_COUNT ?
+			 LEPTON_ASSEMBLE_FRAME_READY : LEPTON_ASSEMBLE_ACCEPTED));
+	}
+	for (zero_segment = 0; zero_segment < 8; zero_segment++) {
+		make_subframe(0, subframe);
+		CHECK(lepton_frame_assembler_push(
+			&assembler, subframe, sizeof(subframe), frame) ==
+			LEPTON_ASSEMBLE_SKIPPED);
+	}
+	for (segment = 1; segment <= LEPTON3_SUBFRAME_COUNT; segment++) {
+		make_subframe(segment, subframe);
+		CHECK(lepton_frame_assembler_push(
+			&assembler, subframe, sizeof(subframe), frame) ==
+			(segment == LEPTON3_SUBFRAME_COUNT ?
+			 LEPTON_ASSEMBLE_FRAME_READY : LEPTON_ASSEMBLE_ACCEPTED));
+	}
+
+	CHECK(assembler.completed_frames == 2);
+	CHECK(assembler.accepted_subframes == 8);
+	CHECK(assembler.skipped_subframes == 8);
+	CHECK(assembler.rejected_subframes == 0);
+	CHECK(assembler.vospi.next_subframe_index == 1);
 }
 
 static void test_rejection_and_resync(void)
@@ -160,6 +198,7 @@ static void test_palette_and_serialization(void)
 int main(void)
 {
 	test_complete_frame();
+	test_invalid_frame_cadence();
 	test_rejection_and_resync();
 	test_palette_and_serialization();
 

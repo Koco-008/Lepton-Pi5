@@ -126,9 +126,14 @@ validated in the final GUI environment before temperature processing is added.
 
 ## Invalid VoSPI Input
 
+Lepton 3.x normally emits eight packet-aligned, zero-numbered segments after
+every unique four-segment frame. The streamer counts these as `skipped` and
+does not publish or log them as errors.
+
 Discard packets such as `2fff`, `4fff`, and `5fff`, all-zero transfers, wrong
-packet IDs, and out-of-order segments are rejected. They are never turned into
-public video frames. Rejections are rate-limited in the system journal:
+packet IDs, and out-of-order nonzero segments are rejected. They are never
+turned into public video frames. Rejections are rate-limited in the system
+journal:
 
 ```sh
 journalctl -u lepton-streamer.service -f

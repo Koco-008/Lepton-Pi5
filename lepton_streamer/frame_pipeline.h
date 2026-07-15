@@ -16,6 +16,7 @@ enum lepton_assemble_result {
 	LEPTON_ASSEMBLE_REJECTED = 0,
 	LEPTON_ASSEMBLE_ACCEPTED = 1,
 	LEPTON_ASSEMBLE_FRAME_READY = 2,
+	LEPTON_ASSEMBLE_SKIPPED = 3,
 };
 
 enum lepton_reject_reason {
@@ -31,6 +32,7 @@ struct lepton_frame_assembler {
 	lepton_vospi_info vospi;
 	uint16_t wire_pixels[LEPTON_FRAME_PIXELS];
 	uint64_t accepted_subframes;
+	uint64_t skipped_subframes;
 	uint64_t rejected_subframes;
 	uint64_t completed_frames;
 	enum lepton_reject_reason last_reject;

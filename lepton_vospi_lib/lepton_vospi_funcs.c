@@ -122,10 +122,11 @@ static unsigned int get_subframe_index_from_subframe(unsigned short *subframe_da
  * Given a lepton_vospi_info struct pointer and a pointer to 16-bit sub-frame
  * data, find the subframe index (1-based).
  *
- * Always return 0 for Lepton 2.X. Return 0 for Lepton 3.X only for duplicate
+ * Always return 0 for Lepton 2.X. Return 0 for Lepton 3.X partial invalid
  * frames.
  */
-static unsigned int get_subframe_index(lepton_vospi_info *lep_info, unsigned short *subframe_data) {
+unsigned int lepton_get_subframe_index(lepton_vospi_info *lep_info,
+				       unsigned short *subframe_data) {
 	unsigned int sidx = 0;
 
 	if (lep_info->lep_version != LEPTON_VERSION_2X) {
@@ -138,7 +139,7 @@ int is_subframe_index_valid(lepton_vospi_info *lep_info, unsigned short *subfram
 	int valid = 0;
 	unsigned int sidx = 0;
 
-	sidx = get_subframe_index(lep_info, subframe_data);
+	sidx = lepton_get_subframe_index(lep_info, subframe_data);
 	if (sidx == lep_info->next_subframe_index) {
 		valid = 1;
 		if (lep_info->next_subframe_index > 0) {
@@ -224,4 +225,5 @@ EXPORT_SYMBOL(init_lepton_info);
 EXPORT_SYMBOL(get_line_from_subframe);
 EXPORT_SYMBOL(is_subframe_line_counter_valid);
 EXPORT_SYMBOL(is_discard_packet);
+EXPORT_SYMBOL(lepton_get_subframe_index);
 #endif
