@@ -29,6 +29,7 @@ if systemctl cat lepton-streamer.service >/dev/null 2>&1; then
 fi
 run rm -f /etc/systemd/system/lepton-streamer.service
 run rm -f /etc/systemd/system/lepton-streamer.service.d/90-auto-recovery.conf
+run rm -f /etc/systemd/system/lepton-streamer.service.d/zz-auto-recovery.conf
 run rm -f /etc/modprobe.d/lepton-streams.conf
 run rm -f /etc/modules-load.d/lepton-streams.conf
 run rm -f /usr/local/bin/lepton_streamer

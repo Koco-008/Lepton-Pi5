@@ -93,7 +93,8 @@ service_source="$repo_root/systemd/lepton-streamer.service"
 modprobe_config="/etc/modprobe.d/lepton-streams.conf"
 modules_load_config="/etc/modules-load.d/lepton-streams.conf"
 service_destination="/etc/systemd/system/lepton-streamer.service"
-service_dropin="/etc/systemd/system/lepton-streamer.service.d/90-auto-recovery.conf"
+service_dropin="/etc/systemd/system/lepton-streamer.service.d/zz-auto-recovery.conf"
+legacy_service_dropin="/etc/systemd/system/lepton-streamer.service.d/90-auto-recovery.conf"
 
 [ -x "$streamer" ] || {
 	echo "Missing $streamer. Run: make -C lepton_streamer" >&2
@@ -149,6 +150,7 @@ run install -D -m 0755 "$vsync_helper" /usr/local/libexec/lepton/rpi_vsync_app
 run install -D -m 0755 "$recovery_helper" /usr/local/libexec/lepton/rpi_recovery_app
 run install -D -m 0755 "$recovery_script" /usr/local/libexec/lepton/recover_lepton_rpi5.sh
 run install -D -m 0644 "$service_source" "$service_destination"
+run rm -f "$legacy_service_dropin"
 
 if [ "$dry_run" -eq 1 ]; then
 	echo "DRY-RUN: install the managed recovery ExecStart override at $service_dropin"
