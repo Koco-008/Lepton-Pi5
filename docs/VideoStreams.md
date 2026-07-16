@@ -1,12 +1,13 @@
 # Lepton Raw and False-Color Video Streams
 
 The Raspberry Pi 5 pipeline exposes two stable V4L2 capture devices for
-applications. The kernel driver's `/dev/video0` node remains an internal VoSPI
-transport and should not be opened by the GUI while the streamer is running.
+applications. The kernel driver's stable `/dev/lepton-vspi` alias remains an
+internal VoSPI transport and should not be opened by the GUI while the streamer
+is running. Its underlying `/dev/videoX` number can change after a reboot.
 
 | Device | Format | Purpose |
 | --- | --- | --- |
-| `/dev/video0` | 82x60 `Y16` | Internal raw VoSPI subframes with packet headers |
+| `/dev/lepton-vspi` | 82x60 `Y16` | Internal raw VoSPI subframes with packet headers |
 | `/dev/video10` | 160x120 `Y16` | Complete 16-bit raw image, little-endian, 38400 bytes |
 | `/dev/video11` | 640x480 `YUYV` | Automatically scaled false-color webcam image |
 
@@ -88,6 +89,35 @@ journalctl -u lepton-streamer.service -n 100 --no-pager
 
 Expected public formats are `160x120 Y16` and `640x480 YUYV`.
 
+## Automatic Recovery
+
+The installed service enables an eight-second completed-frame watchdog. Normal
+Lepton FFC shutter events are shorter than this threshold. If VoSPI transfers
+continue but no complete frame can be assembled for eight seconds, the streamer
+exits with status 75 and its `ExecStopPost` recovery performs this sequence:
+
+1. unload the `lepton` kernel module so chip select and SCK are idle;
+2. wait 250 ms, exceeding FLIR's 185 ms VoSPI resynchronization requirement;
+3. issue the supported `LEP_RunOemReboot` command over CCI/I2C;
+4. wait for the camera boot-ready bit and restore GPIO3 to VSYNC mode;
+5. reload the kernel module and verify `/dev/lepton-vspi` before systemd restarts
+   the streamer.
+
+Recovery attempts are separated by at least 30 seconds to avoid a reboot loop.
+Inspect them with:
+
+```sh
+journalctl -u lepton-streamer.service -g 'Lepton recovery' --no-pager
+systemctl show lepton-streamer.service -p NRestarts -p ExecMainStatus
+```
+
+This mechanism restores service after a recoverable camera or VoSPI lockup. It
+does not make an unstable supply acceptable for measurement equipment. A GPIO
+mode that unexpectedly returns from VSYNC (`5`) to its power-on default (`0`)
+indicates that the camera restarted. In that case, verify the supply directly at
+the breakout under load, connector retention, common ground, and short SPI
+wiring even when software recovery succeeds.
+
 ## End-to-End Test
 
 Once the camera produces valid VoSPI segments, capture one frame from each
@@ -144,7 +174,7 @@ fixed. Their formats remain queryable, but reads wait and the devices do not
 advance until valid segments 1, 2, 3, and 4 are received.
 
 Stop the service before unloading or manually testing the Lepton kernel module,
-because the service intentionally keeps `/dev/video0` open:
+because the service intentionally keeps `/dev/lepton-vspi` open:
 
 ```sh
 sudo systemctl stop lepton-streamer.service

@@ -96,11 +96,19 @@ sudo tools/install_streams_rpi5.sh --dry-run
 sudo tools/install_streams_rpi5.sh
 ```
 
-The service owns `/dev/video0`; applications should use `/dev/video10` or
-`/dev/video11`. Both public nodes use v4l2loopback's compatibility mode so their
-formats remain queryable before the first valid camera frame. Full architecture,
-Python usage, diagnostics, and uninstall steps are documented in
+The service owns the stable `/dev/lepton-vspi` alias; applications should use
+`/dev/video10` or `/dev/video11`. Both public nodes use v4l2loopback's
+compatibility mode so their formats remain queryable before the first valid
+camera frame. Full architecture, automatic recovery, Python usage, diagnostics,
+and uninstall steps are documented in
 [docs/VideoStreams.md](docs/VideoStreams.md).
+
+The recovery-enabled service exits after eight seconds without a completed
+frame, idles VoSPI for 250 ms, soft-reboots the Lepton through the supported OEM
+command, restores VSYNC mode, reloads the kernel module, and restarts the
+streamer. This avoids requiring a manual power cycle for a recoverable camera
+lockup. Repeated recovery events are still a fault: check the breakout supply
+at the board, connectors, common ground, and short SPI wiring.
 
 If you pulled this branch before the 2026-06-25 build fix, update it first:
 

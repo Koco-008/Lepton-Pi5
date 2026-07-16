@@ -18,7 +18,11 @@
 
 #include "lep_i2cdev.h"
 
-#define DEBUG 5
+#ifndef LEPTON_I2C_DEBUG_LEVEL
+#define LEPTON_I2C_DEBUG_LEVEL 5
+#endif
+
+#define DEBUG LEPTON_I2C_DEBUG_LEVEL
 
 #ifdef DEBUG
 int debug_level = DEBUG;
@@ -130,4 +134,3 @@ int i2cdev_write_byte_data(LEP_UINT8 *tx_data, LEP_UINT32 tx_size)
     }
     return write_count;
 }
-

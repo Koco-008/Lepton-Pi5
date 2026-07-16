@@ -63,6 +63,20 @@ verify_capture_format() {
 	return 1
 }
 
+module_available() {
+	module=$1
+
+	if command -v modinfo >/dev/null 2>&1; then
+		modinfo "$module" >/dev/null 2>&1
+		return
+	fi
+
+	module_path=$(find "/lib/modules/$kernel" -type f \
+		\( -name "$module.ko" -o -name "$module.ko.*" \) \
+		-print -quit 2>/dev/null || true)
+	[ -n "$module_path" ]
+}
+
 if [ "$dry_run" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
 	echo "Run as root, or use --dry-run." >&2
 	exit 1
@@ -73,10 +87,13 @@ repo_root=$(dirname "$script_dir")
 kernel=$(uname -r)
 streamer="$repo_root/lepton_streamer/lepton_streamer"
 vsync_helper="$repo_root/lepton_control/rpi_vsync_app"
+recovery_helper="$repo_root/lepton_control/rpi_recovery_app"
+recovery_script="$repo_root/tools/recover_lepton_rpi5.sh"
 service_source="$repo_root/systemd/lepton-streamer.service"
 modprobe_config="/etc/modprobe.d/lepton-streams.conf"
 modules_load_config="/etc/modules-load.d/lepton-streams.conf"
 service_destination="/etc/systemd/system/lepton-streamer.service"
+service_dropin="/etc/systemd/system/lepton-streamer.service.d/90-auto-recovery.conf"
 
 [ -x "$streamer" ] || {
 	echo "Missing $streamer. Run: make -C lepton_streamer" >&2
@@ -84,6 +101,14 @@ service_destination="/etc/systemd/system/lepton-streamer.service"
 }
 [ -x "$vsync_helper" ] || {
 	echo "Missing $vsync_helper. Build lepton_sdk and lepton_control first." >&2
+	exit 1
+}
+[ -x "$recovery_helper" ] || {
+	echo "Missing $recovery_helper. Build lepton_sdk and lepton_control first." >&2
+	exit 1
+}
+[ -f "$recovery_script" ] || {
+	echo "Missing $recovery_script." >&2
 	exit 1
 }
 [ -f "$service_source" ] || {
@@ -95,7 +120,7 @@ service_destination="/etc/systemd/system/lepton-streamer.service"
 	exit 1
 }
 
-if ! modinfo v4l2loopback >/dev/null 2>&1; then
+if ! module_available v4l2loopback; then
 	if [ "$install_packages" -eq 0 ]; then
 		echo "v4l2loopback is unavailable and --skip-packages was selected." >&2
 		exit 1
@@ -111,7 +136,7 @@ if ! modinfo v4l2loopback >/dev/null 2>&1; then
 	fi
 fi
 
-if [ "$dry_run" -eq 0 ] && ! modinfo v4l2loopback >/dev/null 2>&1; then
+if [ "$dry_run" -eq 0 ] && ! module_available v4l2loopback; then
 	echo "v4l2loopback was not built for $kernel. Inspect the DKMS build log." >&2
 	exit 1
 fi
@@ -121,7 +146,20 @@ if systemctl cat lepton-streamer.service >/dev/null 2>&1; then
 fi
 run install -D -m 0755 "$streamer" /usr/local/bin/lepton_streamer
 run install -D -m 0755 "$vsync_helper" /usr/local/libexec/lepton/rpi_vsync_app
+run install -D -m 0755 "$recovery_helper" /usr/local/libexec/lepton/rpi_recovery_app
+run install -D -m 0755 "$recovery_script" /usr/local/libexec/lepton/recover_lepton_rpi5.sh
 run install -D -m 0644 "$service_source" "$service_destination"
+
+if [ "$dry_run" -eq 1 ]; then
+	echo "DRY-RUN: install the managed recovery ExecStart override at $service_dropin"
+else
+	install -d -m 0755 "$(dirname "$service_dropin")"
+	cat > "$service_dropin" <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/local/bin/lepton_streamer --input /dev/lepton-vspi --raw-output /dev/video10 --color-output /dev/video11 --color-width 640 --color-height 480 --stall-timeout 8
+EOF
+fi
 
 if [ "$dry_run" -eq 1 ]; then
 	echo "DRY-RUN: write two-device v4l2loopback options to $modprobe_config"
@@ -131,6 +169,12 @@ else
 		'options v4l2loopback devices=2 video_nr=10,11 card_label="FLIR Lepton Raw,FLIR Lepton False Color" exclusive_caps=0,0 max_buffers=4' \
 		> "$modprobe_config"
 	printf '%s\n' 'v4l2loopback' > "$modules_load_config"
+	printf '%s\n' \
+		'SUBSYSTEM=="video4linux", ATTR{name}=="lepton", SYMLINK+="lepton-vspi"' \
+		> /etc/udev/rules.d/70-lepton-vspi.rules
+	udevadm control --reload-rules
+	udevadm trigger --subsystem-match=video4linux
+	udevadm settle
 fi
 
 if [ "$dry_run" -eq 1 ]; then

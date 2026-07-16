@@ -28,11 +28,19 @@ if systemctl cat lepton-streamer.service >/dev/null 2>&1; then
 	run systemctl disable --now lepton-streamer.service
 fi
 run rm -f /etc/systemd/system/lepton-streamer.service
+run rm -f /etc/systemd/system/lepton-streamer.service.d/90-auto-recovery.conf
 run rm -f /etc/modprobe.d/lepton-streams.conf
 run rm -f /etc/modules-load.d/lepton-streams.conf
 run rm -f /usr/local/bin/lepton_streamer
 run rm -f /usr/local/libexec/lepton/rpi_vsync_app
+run rm -f /usr/local/libexec/lepton/rpi_recovery_app
+run rm -f /usr/local/libexec/lepton/recover_lepton_rpi5.sh
+run rm -f /etc/udev/rules.d/70-lepton-vspi.rules
 run systemctl daemon-reload
+
+if [ "$dry_run" -eq 0 ] && command -v udevadm >/dev/null 2>&1; then
+	udevadm control --reload-rules
+fi
 
 if [ "$dry_run" -eq 1 ]; then
 	echo "DRY-RUN: unload v4l2loopback when no process is using it"

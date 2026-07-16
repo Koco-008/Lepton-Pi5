@@ -30,6 +30,13 @@
 #define INPUT_POLL_TIMEOUT_MS 2000
 #define OUTPUT_POLL_TIMEOUT_MS 1000
 #define MAX_OUTPUT_DIMENSION 8192U
+#define STALL_RECOVERY_EXIT_STATUS 75
+
+enum streamer_result {
+	STREAMER_ERROR = -1,
+	STREAMER_OK = 0,
+	STREAMER_STALLED = 1,
+};
 
 struct mapped_buffer {
 	void *address;
@@ -59,6 +66,7 @@ struct options {
 	const char *color_path;
 	unsigned int color_width;
 	unsigned int color_height;
+	unsigned int stall_timeout_seconds;
 	uint64_t frame_limit;
 	bool quiet;
 };
@@ -137,6 +145,7 @@ static void print_usage(FILE *stream, const char *program)
 		"  -c, --color-output PATH   False-color YUYV output [%s]\n"
 		"      --color-width PIXELS  False-color width [%u]\n"
 		"      --color-height PIXELS False-color height [%u]\n"
+		"      --stall-timeout SEC   Exit 75 after SEC without a complete frame [off]\n"
 		"  -n, --frames COUNT        Stop after COUNT completed frames\n"
 		"  -q, --quiet               Suppress periodic status output\n"
 		"  -h, --help                Show this help\n",
@@ -153,6 +162,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 	enum {
 		OPTION_COLOR_WIDTH = 1000,
 		OPTION_COLOR_HEIGHT,
+		OPTION_STALL_TIMEOUT,
 	};
 	static const struct option long_options[] = {
 		{ "input", required_argument, NULL, 'i' },
@@ -160,6 +170,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 		{ "color-output", required_argument, NULL, 'c' },
 		{ "color-width", required_argument, NULL, OPTION_COLOR_WIDTH },
 		{ "color-height", required_argument, NULL, OPTION_COLOR_HEIGHT },
+		{ "stall-timeout", required_argument, NULL, OPTION_STALL_TIMEOUT },
 		{ "frames", required_argument, NULL, 'n' },
 		{ "quiet", no_argument, NULL, 'q' },
 		{ "help", no_argument, NULL, 'h' },
@@ -200,6 +211,10 @@ static int parse_options(int argc, char **argv, struct options *options)
 			break;
 		case OPTION_COLOR_HEIGHT:
 			if (parse_unsigned(optarg, &options->color_height) != 0)
+				return -1;
+			break;
+		case OPTION_STALL_TIMEOUT:
+			if (parse_unsigned(optarg, &options->stall_timeout_seconds) != 0)
 				return -1;
 			break;
 		case 'h':
@@ -805,8 +820,9 @@ static int run_streamer(const struct options *options)
 	uint8_t *color_yuyv = NULL;
 	size_t color_size;
 	uint64_t published_frames = 0;
+	uint64_t last_frame_ms;
 	uint64_t last_status_ms;
-	int return_code = -1;
+	int return_code = STREAMER_ERROR;
 
 	if (options->color_width > SIZE_MAX / options->color_height / 2U ||
 	    options->color_width > UINT32_MAX / options->color_height / 2U) {
@@ -839,6 +855,7 @@ static int run_streamer(const struct options *options)
 		"Lepton streams running: raw=%s, false-color=%s\n",
 		options->raw_path, options->color_path);
 	last_status_ms = monotonic_milliseconds();
+	last_frame_ms = last_status_ms;
 
 	while (!stop_requested &&
 	       (options->frame_limit == 0 ||
@@ -848,6 +865,8 @@ static int run_streamer(const struct options *options)
 			.events = POLLIN | POLLPRI,
 		};
 		struct v4l2_buffer buffer = { 0 };
+		uint64_t frames_before = published_frames;
+		uint64_t now_ms;
 		int poll_result = poll(&poll_fd, 1, INPUT_POLL_TIMEOUT_MS);
 
 		if (poll_result < 0) {
@@ -860,6 +879,16 @@ static int run_streamer(const struct options *options)
 		if (poll_result == 0) {
 			fprintf(stderr, "%s: no VoSPI buffer for %d ms\n",
 				capture.path, INPUT_POLL_TIMEOUT_MS);
+			now_ms = monotonic_milliseconds();
+			if (options->stall_timeout_seconds != 0 &&
+			    now_ms - last_frame_ms >=
+				    (uint64_t)options->stall_timeout_seconds * 1000U) {
+				fprintf(stderr,
+					"No complete Lepton frame for %u seconds; requesting recovery\n",
+					options->stall_timeout_seconds);
+				return_code = STREAMER_STALLED;
+				goto done;
+			}
 			continue;
 		}
 		if ((poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
@@ -893,8 +922,21 @@ static int run_streamer(const struct options *options)
 			goto done;
 		}
 
+		now_ms = monotonic_milliseconds();
+		if (published_frames != frames_before)
+			last_frame_ms = now_ms;
+		else if (options->stall_timeout_seconds != 0 &&
+			 now_ms - last_frame_ms >=
+				 (uint64_t)options->stall_timeout_seconds * 1000U) {
+			fprintf(stderr,
+				"No complete Lepton frame for %u seconds; requesting recovery\n",
+				options->stall_timeout_seconds);
+			return_code = STREAMER_STALLED;
+			goto done;
+		}
+
 		if (!options->quiet &&
-		    monotonic_milliseconds() - last_status_ms >= 2000U) {
+		    now_ms - last_status_ms >= 2000U) {
 			fprintf(stderr,
 				"frames=%llu accepted=%llu skipped=%llu rejected=%llu min=%u max=%u\n",
 				(unsigned long long)published_frames,
@@ -902,11 +944,11 @@ static int run_streamer(const struct options *options)
 				(unsigned long long)assembler.skipped_subframes,
 				(unsigned long long)assembler.rejected_subframes,
 				range.minimum, range.maximum);
-			last_status_ms = monotonic_milliseconds();
+			last_status_ms = now_ms;
 		}
 	}
 
-	return_code = 0;
+	return_code = STREAMER_OK;
 
 done:
 	close_capture(&capture);
@@ -936,5 +978,13 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	return run_streamer(&options) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+	{
+		int result = run_streamer(&options);
+
+		if (result == STREAMER_OK)
+			return EXIT_SUCCESS;
+		if (result == STREAMER_STALLED)
+			return STALL_RECOVERY_EXIT_STATUS;
+		return EXIT_FAILURE;
+	}
 }
