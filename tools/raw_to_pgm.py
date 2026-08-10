@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert one 160x120 uint16 Lepton raw frame to optional 16-bit PGM."""
+"""Inspect one radiometric 160x120 Lepton Y16 frame and optionally write PGM."""
 
 from __future__ import annotations
 
@@ -11,11 +11,20 @@ from pathlib import Path
 WIDTH = 160
 HEIGHT = 120
 FRAME_BYTES = WIDTH * HEIGHT * 2
+TLINEAR_SCALE = 100.0
+KELVIN_OFFSET_CELSIUS = 273.15
+
+
+def kelvin_x100_to_celsius(value: int) -> float:
+    return value / TLINEAR_SCALE - KELVIN_OFFSET_CELSIUS
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Inspect a 160x120 uint16 Lepton raw frame and optionally write 16-bit PGM."
+        description=(
+            "Inspect a 160x120 little-endian TLinear frame (Kelvin x100) and "
+            "optionally write 16-bit PGM."
+        )
     )
     parser.add_argument("input", type=Path, help="Input .gray frame")
     parser.add_argument("--output", "-o", type=Path, help="Output 16-bit PGM path")
@@ -54,12 +63,20 @@ def write_pgm(path: Path, pixels: array.array) -> None:
 def main() -> None:
     args = parse_args()
     pixels = read_pixels(args.input, args.endian)
+    minimum = min(pixels)
+    maximum = max(pixels)
+    center = pixels[(HEIGHT // 2) * WIDTH + WIDTH // 2]
     print(f"file={args.input}")
     print(f"width={WIDTH}")
     print(f"height={HEIGHT}")
     print(f"endian={args.endian}")
-    print(f"min={min(pixels)}")
-    print(f"max={max(pixels)}")
+    print("temperature_contract=kelvin_x100")
+    print(f"min={minimum}")
+    print(f"max={maximum}")
+    print(f"center={center}")
+    print(f"min_celsius={kelvin_x100_to_celsius(minimum):.2f}")
+    print(f"max_celsius={kelvin_x100_to_celsius(maximum):.2f}")
+    print(f"center_celsius={kelvin_x100_to_celsius(center):.2f}")
     if args.output:
         write_pgm(args.output, pixels)
         print(f"pgm={args.output}")

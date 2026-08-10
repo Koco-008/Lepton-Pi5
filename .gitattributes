@@ -5,3 +5,6 @@
 *.h text eol=lf
 Makefile text eol=lf
 Kbuild text eol=lf
+
+# Preserve the original FLIR SDK line endings; these vendor files are stored as CRLF.
+lepton_sdk/** -text

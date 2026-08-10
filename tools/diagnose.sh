@@ -97,6 +97,19 @@ for helper in ./lepton_control/rpi_vsync_app ./lepton_data_collector/lepton_data
 	fi
 done
 
+echo "== radiometry status =="
+radiometry_helper=""
+if [ -x /usr/local/libexec/lepton/rpi_recovery_app ]; then
+	radiometry_helper=/usr/local/libexec/lepton/rpi_recovery_app
+elif [ -x ./lepton_control/rpi_recovery_app ]; then
+	radiometry_helper=./lepton_control/rpi_recovery_app
+fi
+if [ -n "$radiometry_helper" ]; then
+	timeout 8s "$radiometry_helper" --status --boot-timeout-ms 6000 || true
+else
+	echo "rpi_recovery_app missing or not executable"
+fi
+
 echo "== lepton modinfo =="
 if command -v modinfo >/dev/null 2>&1; then
 	modinfo lepton 2>/dev/null || modinfo ./lepton_module/lepton.ko 2>/dev/null || true

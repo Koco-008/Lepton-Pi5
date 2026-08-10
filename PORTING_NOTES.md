@@ -1,5 +1,19 @@
 # Raspberry Pi 5 Kernel 6.18 Porting Notes
 
+## Radiometric stream branch
+
+The `rpi5-radiometric` branch preserves the public video formats and adds an
+explicit camera-state contract. `rpi_recovery_app --configure`, already used as
+the service pre-start and recovery configuration step, now enables radiometry,
+enables TLinear, disables automatic resolution switching, selects 0.01-K
+resolution, and verifies all values by reading them back. As a result,
+`/dev/video10` remains 160x120 little-endian Y16 but each uint16 sample is Kelvin
+x100. Celsius is `raw / 100.0 - 273.15`.
+
+The service fails before opening the VoSPI input if the camera does not support
+or retain this configuration. This is intentional: a measurement application
+must not silently reinterpret non-TLinear counts as temperatures.
+
 Base commit: `6f92303aa148ad1505622fbc9ebc6899a69be3e2`
 
 Working branch: `rpi5-kernel-6.18`

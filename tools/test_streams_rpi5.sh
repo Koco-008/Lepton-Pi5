@@ -25,6 +25,33 @@ for device in "$raw_device" "$color_device"; do
 	}
 done
 
+radiometry_helper=/usr/local/libexec/lepton/rpi_recovery_app
+[ -x "$radiometry_helper" ] || {
+	echo "Missing installed radiometry helper: $radiometry_helper" >&2
+	exit 1
+}
+
+echo "== radiometry contract =="
+if ! radiometry_status=$("$radiometry_helper" --status --boot-timeout-ms 6000); then
+	echo "Unable to verify the camera's radiometry state." >&2
+	echo "If /dev/i2c-1 is permission denied, rerun this test with sudo." >&2
+	exit 1
+fi
+printf '%s\n' "$radiometry_status"
+for expected in \
+	'gpio_mode=5' \
+	'radiometry_enabled=1' \
+	'tlinear_enabled=1' \
+	'tlinear_auto_resolution=0' \
+	'tlinear_resolution_kelvin=0.01' \
+	'tlinear_scale=100' \
+	'temperature_contract=kelvin_x100'; do
+	printf '%s\n' "$radiometry_status" | grep -Fxq "$expected" || {
+		echo "Missing radiometry status field: $expected" >&2
+		exit 1
+	}
+done
+
 echo "== service =="
 systemctl --no-pager --full status lepton-streamer.service || true
 
@@ -91,3 +118,5 @@ actual_color_bytes=$(stat -c %s "$temporary_directory/color.yuyv")
 
 echo "PASS: raw frame is $actual_raw_bytes bytes"
 echo "PASS: false-color frame is $actual_color_bytes bytes"
+echo "PASS: camera and raw frame contract are little-endian Kelvin x100"
+echo "      Celsius = raw / 100.0 - 273.15"

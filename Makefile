@@ -19,7 +19,9 @@ lepton_streamer:
 	${MAKE} -C lepton_streamer
 
 check:
+	${MAKE} -C lepton_control check
 	${MAKE} -C lepton_streamer check
+	python3 tools/test_raw_to_pgm.py
 
 clean:
 	${MAKE} -C lepton_sdk clean
@@ -28,4 +30,3 @@ clean:
 	${MAKE} -C lepton_streamer clean
 
 .PHONY: all check clean lepton_sdk lepton_control lepton_data_collector lepton_streamer
-

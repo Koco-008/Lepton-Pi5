@@ -1,0 +1,24 @@
+name: Radiometric integration tests
+
+on:
+  push:
+    branches:
+      - rpi5-radiometric
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build FLIR SDK
+        run: make -C lepton_sdk
+      - name: Build recovery application
+        run: make -C lepton_control rpi_recovery_app
+      - name: Run deterministic tests
+        run: make check
+      - name: Check recovery CLI
+        run: ./lepton_control/rpi_recovery_app --help

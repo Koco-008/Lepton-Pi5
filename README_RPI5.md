@@ -85,7 +85,8 @@ only when intentionally cross-compiling.
 After the base kernel driver is installed, the stream service creates two
 application-facing V4L2 devices:
 
-- `/dev/video10`: complete 160x120 little-endian `Y16` raw frames;
+- `/dev/video10`: complete 160x120 little-endian `Y16` radiometric frames,
+  where every pixel is Kelvin x100;
 - `/dev/video11`: 640x480 `YUYV` false-color frames with per-frame min/max
   scaling from blue (coldest raw value) to red (hottest raw value).
 
@@ -105,10 +106,22 @@ and uninstall steps are documented in
 
 The recovery-enabled service exits after eight seconds without a completed
 frame, idles VoSPI for 250 ms, soft-reboots the Lepton through the supported OEM
-command, restores VSYNC mode, reloads the kernel module, and restarts the
-streamer. This avoids requiring a manual power cycle for a recoverable camera
-lockup. Repeated recovery events are still a fault: check the breakout supply
-at the board, connectors, common ground, and short SPI wiring.
+command, restores VSYNC mode, verifies radiometry and fixed 0.01-K TLinear
+output, reloads the kernel module, and restarts the streamer. This avoids
+requiring a manual power cycle for a recoverable camera lockup. Repeated
+recovery events are still a fault: check the breakout supply at the board,
+connectors, common ground, and short SPI wiring.
+
+Verify the active temperature contract at any time:
+
+```sh
+sudo /usr/local/libexec/lepton/rpi_recovery_app --status
+```
+
+The required final line is `temperature_contract=kelvin_x100`. Convert each
+`/dev/video10` value with `celsius = raw / 100.0 - 273.15`. See
+[docs/VideoStreams.md](docs/VideoStreams.md) for robust OpenCV decoding and the
+radiometric measurement limitations.
 
 If you pulled this branch before the 2026-06-25 build fix, update it first:
 
@@ -261,7 +274,8 @@ Convert a raw frame to 16-bit PGM for inspection:
 tools/raw_to_pgm.py /tmp/capture/frame_000000.gray --endian little --output /tmp/capture/frame_000000.pgm
 ```
 
-The converter reports min/max only. It does not interpret temperatures.
+The converter reports raw minimum, maximum, center value, and all three values
+in degrees Celsius. It assumes the service's verified Kelvin-x100 contract.
 
 ## Uninstall
 

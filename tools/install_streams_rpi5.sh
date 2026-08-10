@@ -214,6 +214,13 @@ run systemctl daemon-reload
 run systemctl enable --now lepton-streamer.service
 
 if [ "$dry_run" -eq 1 ]; then
+	echo "DRY-RUN: verify VSYNC and the Kelvin-x100 radiometry contract"
+elif ! /usr/local/libexec/lepton/rpi_recovery_app --status --boot-timeout-ms 6000; then
+	echo "Lepton VSYNC/radiometry state verification failed." >&2
+	exit 1
+fi
+
+if [ "$dry_run" -eq 1 ]; then
 	echo "DRY-RUN: verify capture formats on /dev/video10 and /dev/video11"
 elif command -v v4l2-ctl >/dev/null 2>&1; then
 	if ! verify_capture_format /dev/video10 160/120 "Y16 "; then
@@ -231,6 +238,6 @@ else
 fi
 
 echo "Installed Lepton streams:"
-echo "  /dev/video10  160x120 Y16 raw pixels"
+echo "  /dev/video10  160x120 Y16 TLinear temperatures (Kelvin x100)"
 echo "  /dev/video11  640x480 YUYV automatic false color"
 echo "Run tools/test_streams_rpi5.sh after valid VoSPI packets are available."

@@ -852,7 +852,7 @@ static int run_streamer(const struct options *options)
 		goto done;
 
 	fprintf(stderr,
-		"Lepton streams running: raw=%s, false-color=%s\n",
+		"Lepton streams running: raw=%s (Kelvin x100), false-color=%s\n",
 		options->raw_path, options->color_path);
 	last_status_ms = monotonic_milliseconds();
 	last_frame_ms = last_status_ms;

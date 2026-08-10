@@ -56,7 +56,7 @@ if [ -x "$recovery_app" ]; then
 	fi
 	sleep 1
 	if ! timeout 8s "$recovery_app" --configure --boot-timeout-ms 6000; then
-		log "camera did not become ready or VSYNC could not be configured"
+		log "camera did not become ready or VSYNC/TLinear could not be configured"
 	fi
 else
 	log "missing recovery helper: $recovery_app"
