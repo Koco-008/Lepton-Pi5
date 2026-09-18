@@ -9,11 +9,12 @@ TEST_APPLICATION := test_frame_pipeline
 COMMON_OBJECTS := frame_pipeline.o lepton_vospi_funcs.o
 APPLICATION_OBJECTS := lepton_streamer.o $(COMMON_OBJECTS) lep_i2cdev.o
 SDK_LIB := ../lepton_sdk/liblepton_sdk.a
+SDK_CFLAGS ?= -g -O2
 
 all: $(APPLICATION)
 
 $(SDK_LIB):
-	$(MAKE) -C ../lepton_sdk
+	$(MAKE) -C ../lepton_sdk CFLAGS='$(SDK_CFLAGS)'
 
 $(APPLICATION): $(APPLICATION_OBJECTS) $(SDK_LIB)
 	$(CC) $(CFLAGS) -o $@ $(APPLICATION_OBJECTS) $(SDK_LIB) $(LDFLAGS) $(LDLIBS) -ldl
