@@ -157,6 +157,8 @@ LEP_RESULT DEV_I2C_MasterInit(LEP_UINT16 portID,
                               LEP_UINT16 *BaudRate)
 {
 	LEP_RESULT result = LEP_OK;
+
+	(void)portID;
 	int numAardvarkConnected = 0;
 	LEP_UINT16 numFreeDevices;
 #if defined(WINDOWSS) || defined(WIN32)
@@ -387,8 +389,13 @@ LEP_RESULT DEV_I2C_MasterReadData(LEP_UINT16  portID,               // User-defi
                                  )
 {
    LEP_RESULT result = LEP_OK;
-   int ftdiStatus;
    int aardvark_result;
+#if defined(WINDOWSS) || defined(WIN32)
+   int ftdiStatus;
+#endif
+
+   (void)portID;
+   (void)status;
 
     /* Place Device-Specific Interface here
     */ 
@@ -461,15 +468,23 @@ LEP_RESULT DEV_I2C_MasterReadData(LEP_UINT16  portID,               // User-defi
 		break;
 #endif
    case LINUX_I2CDEV_I2C:
-        bytesActuallyRead = i2cdev_read_byte_data(txdata, rxdata, bytesToRead);
-        if(bytesActuallyRead != bytesToRead)
         {
-            result = LEP_ERROR_I2C_FAIL;
-        }
-        if(bytesActuallyRead < 0)
-        {
-            // don't shift negative values into wordsActuallyRead
-            bytesActuallyRead = 0;
+            int linuxReadResult =
+                i2cdev_read_byte_data(txdata, rxdata, bytesToRead);
+
+            if(linuxReadResult < 0)
+            {
+                bytesActuallyRead = 0;
+                result = LEP_ERROR_I2C_FAIL;
+            }
+            else
+            {
+                bytesActuallyRead = (LEP_UINT32)linuxReadResult;
+                if(bytesActuallyRead != bytesToRead)
+                {
+                    result = LEP_ERROR_I2C_FAIL;
+                }
+            }
         }
         break;
    case AARDVARK_I2C:
@@ -525,8 +540,13 @@ LEP_RESULT DEV_I2C_MasterWriteData(LEP_UINT16  portID,              // User-defi
                                    LEP_UINT16 *status)              // Transaction Status
 {
    LEP_RESULT result = LEP_OK;
-   int ftdiStatus;
    int aardvark_result;
+#if defined(WINDOWSS) || defined(WIN32)
+   int ftdiStatus;
+#endif
+
+   (void)portID;
+   (void)status;
    
    LEP_INT32 bytesOfDataToWrite = (wordsToWrite << 1);
    LEP_INT32 bytesToWrite = bytesOfDataToWrite + ADDRESS_SIZE_BYTES;
