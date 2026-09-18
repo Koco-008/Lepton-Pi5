@@ -172,7 +172,7 @@ LEP_RESULT DEV_I2C_MasterInit(LEP_UINT16 portID,
 	TIMEVAL socketTimeout;
 #endif
 
-fprintf(stderr, "You are here.  masterDevice is: %d\n", (int)masterDevice);
+
     /* Place Device-Specific Interface here
     */
    switch(masterDevice)
@@ -403,6 +403,11 @@ LEP_RESULT DEV_I2C_MasterReadData(LEP_UINT16  portID,               // User-defi
    LEP_UINT16 *dataPtr;
    LEP_UINT16 *writePtr;
 
+   if(readDataPtr == NULL || numWordsRead == NULL)
+      return(LEP_BAD_ARG_POINTER_ERROR);
+   if(wordsToRead > (LEP_I2C_DATA_BUFFER_0_LENGTH / sizeof(LEP_UINT16)))
+      return(LEP_RANGE_ERROR);
+
    *(LEP_UINT16*)txdata = REVERSE_ENDIENESS_UINT16(regAddress);
 
 
@@ -529,6 +534,11 @@ LEP_RESULT DEV_I2C_MasterWriteData(LEP_UINT16  portID,              // User-defi
    LEP_UINT8* txdata = &tx[0];
    LEP_UINT16 *dataPtr;
    LEP_UINT16 *txPtr;
+
+   if((wordsToWrite > 0 && writeDataPtr == NULL) || numWordsWritten == NULL)
+      return(LEP_BAD_ARG_POINTER_ERROR);
+   if(wordsToWrite > (LEP_I2C_DATA_BUFFER_0_LENGTH / sizeof(LEP_UINT16)))
+      return(LEP_RANGE_ERROR);
 
    *(LEP_UINT16*)txdata = REVERSE_ENDIENESS_UINT16(regAddress);
    dataPtr = (LEP_UINT16*)&writeDataPtr[0];
