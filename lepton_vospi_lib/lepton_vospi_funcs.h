@@ -1,3 +1,6 @@
+#ifndef LEPTON_VOSPI_FUNCS_H
+#define LEPTON_VOSPI_FUNCS_H
+
 /*
  * Constants for telemetry, sub-frame and frame sizes, for calculating buffer
  * sizes.
@@ -110,4 +113,4 @@ int is_subframe_index_valid(lepton_vospi_info *lep_info, unsigned short *subfram
 int extract_pixel_data(lepton_vospi_info *lep_info, unsigned short *received_frame, unsigned short *pixel_data,
 					  int *done);
 
-
+#endif /* LEPTON_VOSPI_FUNCS_H */
