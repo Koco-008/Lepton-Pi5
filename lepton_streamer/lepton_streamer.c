@@ -749,8 +749,8 @@ static int process_capture_buffer(
 	uint8_t raw_y16le[LEPTON_Y16_FRAME_BYTES],
 	uint8_t *color_yuyv,
 	const struct options *options,
-	const struct output_device *raw_output,
-	const struct output_device *color_output,
+	struct output_device *raw_output,
+	struct output_device *color_output,
 	struct lepton_frame_range *range,
 	uint64_t *published_frames)
 {
