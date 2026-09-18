@@ -25,9 +25,11 @@ need_root() {
 
 need_root
 
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(dirname "$script_dir")
 kernel=$(uname -r)
-module_src="lepton_module/lepton.ko"
-overlay_src="lepton_module/flir-lepton-rpi5.dtbo"
+module_src="$repo_root/lepton_module/lepton.ko"
+overlay_src="$repo_root/lepton_module/flir-lepton-rpi5.dtbo"
 module_dst="/lib/modules/$kernel/extra/lepton.ko"
 overlay_dst="/boot/firmware/overlays/flir-lepton-rpi5.dtbo"
 config="/boot/firmware/config.txt"
