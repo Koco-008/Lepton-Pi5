@@ -1,5 +1,6 @@
 CC ?= gcc
-CPPFLAGS += -I../lepton_vospi_lib
+CPPFLAGS += -I../lepton_vospi_lib -I../lepton_sdk -I../lepton_control
+CPPFLAGS += -DI2C_DEVICE_FILE=\"/dev/i2c-1\"
 CFLAGS ?= -O2 -g
 CFLAGS += -std=c11 -Wall -Wextra -Wpedantic
 
