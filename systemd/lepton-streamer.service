@@ -7,9 +7,12 @@ StartLimitBurst=10
 
 [Service]
 Type=simple
-ExecStartPre=/usr/local/libexec/lepton/rpi_recovery_app --configure --boot-timeout-ms 6000
+User=lepton
+Group=lepton
+SupplementaryGroups=video i2c
+ExecStartPre=+/usr/local/libexec/lepton/rpi_recovery_app --configure --boot-timeout-ms 6000
 ExecStart=/usr/local/bin/lepton_streamer --input /dev/lepton-vspi --raw-output /dev/video10 --color-output /dev/video11 --color-width 640 --color-height 480 --stall-timeout 8
-ExecStopPost=/usr/local/libexec/lepton/recover_lepton_rpi5.sh
+ExecStopPost=+/usr/local/libexec/lepton/recover_lepton_rpi5.sh
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=30
