@@ -176,6 +176,7 @@ LEP_RESULT LEP_I2C_GetAttribute(LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
     LEP_INT16 statusCode;
     LEP_UINT32 done;
     LEP_UINT16 crcExpected, crcActual;
+    LEP_UINT16 timeoutCount = LEPTON_I2C_COMMAND_BUSY_WAIT_COUNT;
 
     /* Implement the Lepton TWI READ Protocol
     */
