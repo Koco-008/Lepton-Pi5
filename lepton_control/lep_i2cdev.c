@@ -65,7 +65,7 @@ int i2cdev_init()
         close(lepton_i2c_fd);
         lepton_i2c_fd = -1;
     }
-    lepton_i2c_fd = open(I2C_DEVICE_FILE, O_RDWR);
+    lepton_i2c_fd = open(I2C_DEVICE_FILE, O_RDWR | O_CLOEXEC);
     if (lepton_i2c_fd < 0)
     {
         DEBUG_PRINT(1, "Failed I2C open(): %s\n", strerror(errno))
@@ -76,6 +76,8 @@ int i2cdev_init()
         if (ioctl(lepton_i2c_fd, I2C_SLAVE, LEP_I2C_DEVICE_ADDRESS) < 0)
         {
             DEBUG_PRINT(1, "Failed I2C ioctl(): %s\n", strerror(errno))
+            close(lepton_i2c_fd);
+            lepton_i2c_fd = -1;
             return -1;
         }
     }
@@ -98,19 +100,25 @@ int i2cdev_read_byte_data(LEP_UINT8 *rx_adr, LEP_UINT8 *rx_data, LEP_UINT32 rx_s
 {
     int read_count = 0;
 
-    DEBUG_PRINT(5, "%s(rx_adr=%p, rx_data=%p, rx_size=%ld) called.\n", __func__, rx_adr, rx_data, rx_size);
+    DEBUG_PRINT(5, "%s(rx_adr=%p, rx_data=%p, rx_size=%u) called.\\n", __func__, rx_adr, rx_data, (unsigned int)rx_size);
     DEBUG_PRINT(4, "Writing big-endian address 0x%02x%02x\n", rx_adr[0], rx_adr[1])
-    int write_data = write(lepton_i2c_fd, rx_adr, ADDRESS_WIDTH);
-    if (write_data < 0)
+    int write_data;
+    do {
+        write_data = write(lepton_i2c_fd, rx_adr, ADDRESS_WIDTH);
+    } while (write_data < 0 && errno == EINTR);
+    if (write_data != ADDRESS_WIDTH)
     {
-        DEBUG_PRINT(1, "Failed I2C write(%d, 0x%02x%02x, %d): %s\n", lepton_i2c_fd, rx_adr[0], rx_adr[1], ADDRESS_WIDTH,
-                    strerror(errno))
+        if (write_data >= 0) errno = EIO;
+        DEBUG_PRINT(1, "Failed/short I2C address write: %s\n", strerror(errno))
         return -1;
     }
-    read_count = read(lepton_i2c_fd, rx_data, rx_size);
-    if (read_count < 0)
+    do {
+        read_count = read(lepton_i2c_fd, rx_data, rx_size);
+    } while (read_count < 0 && errno == EINTR);
+    if (read_count != (int)rx_size)
     {
-        DEBUG_PRINT(1, "Failed I2C read(%d, %p, %d): %s\n", lepton_i2c_fd, rx_data, rx_size, strerror(errno))
+        if (read_count >= 0) errno = EIO;
+        DEBUG_PRINT(1, "Failed/short I2C read: %s\n", strerror(errno))
         return -1;
     }
     DEBUG_PRINT(4, "Read back %d bytes from I2C read:\n", read_count)
@@ -126,10 +134,13 @@ int i2cdev_write_byte_data(LEP_UINT8 *tx_data, LEP_UINT32 tx_size)
 
     DEBUG_PRINT(4, "Write %d bytes in tx_data:\n", tx_size)
     DEBUG_DUMP(4, tx_data, 4, tx_size, 16)
-    write_count = write(lepton_i2c_fd, tx_data, tx_size);
-    if (write_count < 0)
+    do {
+        write_count = write(lepton_i2c_fd, tx_data, tx_size);
+    } while (write_count < 0 && errno == EINTR);
+    if (write_count != (int)tx_size)
     {
-        DEBUG_PRINT(1, "Failed I2C write(%d, %p, %d): %s\n", lepton_i2c_fd, tx_data, tx_size, strerror(errno))
+        if (write_count >= 0) errno = EIO;
+        DEBUG_PRINT(1, "Failed/short I2C write: %s\n", strerror(errno))
         return -1;
     }
     return write_count;
