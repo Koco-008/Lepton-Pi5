@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - rpi5-radiometric
+      - revised
   pull_request:
 
 permissions:
