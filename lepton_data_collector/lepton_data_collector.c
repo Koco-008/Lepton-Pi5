@@ -65,7 +65,7 @@ static void errno_exit(const char *s)
         exit(EXIT_FAILURE);
 }
 
-static int xioctl(int fh, int request, void *arg)
+static int xioctl(int fh, unsigned long request, void *arg)
 {
         int r;
 
@@ -681,17 +681,26 @@ static void open_device(void)
                 exit(EXIT_FAILURE);
         }
 
-        fd = open(dev_name, O_RDWR /* required */ | O_NONBLOCK | O_CLOEXEC, 0);
+        fd = open(dev_name, O_RDWR /* required */ | O_NONBLOCK, 0);
 
         if (-1 == fd) {
                 fprintf(stderr, "Cannot open '%s': %d, %s\n",
                          dev_name, errno, strerror(errno));
                 exit(EXIT_FAILURE);
         }
+
+        if (-1 == fcntl(fd, F_SETFD, FD_CLOEXEC)) {
+                fprintf(stderr, "Cannot set FD_CLOEXEC on '%s': %d, %s\n",
+                         dev_name, errno, strerror(errno));
+                close(fd);
+                fd = -1;
+                exit(EXIT_FAILURE);
+        }
 }
 
 static void usage(FILE *fp, int argc, char **argv)
 {
+        (void)argc;
         fprintf(fp,
                  "Usage: %s [options]\n\n"
                  "Version 1.3\n"
