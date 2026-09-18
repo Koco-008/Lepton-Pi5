@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/time.h>
+#include <time.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 
@@ -65,7 +66,7 @@ static void errno_exit(const char *s)
         exit(EXIT_FAILURE);
 }
 
-static int xioctl(int fh, int request, void *arg)
+static int xioctl(int fh, unsigned long request, void *arg)
 {
         int r;
 
@@ -93,7 +94,7 @@ static int peek_lepton3_subframe_index(const void *p)
         return sidx;
 }
 
-static void debug_rejected_subframe(const void *p)
+static void debug_rejected_subframe(const void *p, size_t size)
 {
         const unsigned char *base = p;
         const unsigned char *line0 = base;
@@ -105,7 +106,9 @@ static void debug_rejected_subframe(const void *p)
                 base + (LEPTON_SUBFRAME_DATA_LINE_HEIGHT - 1) *
                        LEPTON_SUBFRAME_LINE_BYTE_WIDTH;
 
-        if (!debug_headers || debug_headers_left <= 0 || lep_version != LEPTON_VERSION_3X)
+        if (!debug_headers || debug_headers_left <= 0 ||
+            lep_version != LEPTON_VERSION_3X ||
+            size < LEPTON_SUBFRAME_DATA_LINE_HEIGHT * LEPTON_SUBFRAME_LINE_BYTE_WIDTH)
                 return;
 
         fprintf(stderr,
@@ -122,6 +125,12 @@ static void debug_rejected_subframe(const void *p)
 
 static void process_image(const void *p, int size)
 {
+        size_t expected_size = lep_info.subframe_params.subframe_data_byte_size;
+
+        if (p == NULL || size < 0 || (size_t)size < expected_size) {
+                fprintf(stderr, "S");
+                return;
+        }
         if (out_buf)
         {
                 FILE *out_file = NULL;
@@ -136,24 +145,31 @@ static void process_image(const void *p, int size)
                                  * the last subframe of a Lepton 3.X frame was
                                  * received.
                                  */
-                                snprintf(out_path, sizeof(out_path), "%s%06d.gray", out_file_prefix,
-                                        frame_number);
+                                int path_len = snprintf(out_path, sizeof(out_path), "%s%06d.gray",
+                                                        out_file_prefix, frame_number);
+                                size_t pixel_count = lep_info.image_params.pixel_width *
+                                                     lep_info.image_params.pixel_height;
+                                if (path_len < 0 || (size_t)path_len >= sizeof(out_path)) {
+                                        fprintf(stderr, "Output path too long\n");
+                                        exit(EXIT_FAILURE);
+                                }
                                 out_file = fopen(out_path, "wb");
-                                if (out_file) {
-                                        fwrite(pixel_data, sizeof(unsigned short),
-                                        lep_info.image_params.pixel_width*lep_info.image_params.pixel_height,
-                                        out_file);
-                                        fclose(out_file);
-                                        /* image stored */
+                                if (out_file &&
+                                    fwrite(pixel_data, sizeof(unsigned short), pixel_count,
+                                           out_file) == pixel_count &&
+                                    fclose(out_file) == 0) {
+                                        out_file = NULL;
                                         fflush(stderr);
                                         fprintf(stderr, "*");
+                                        frame_number++;
                                 }
                                 else {
-                                        /* failed to store image frame */
-                                        fflush(stderr);
-                                        fprintf(stderr, "G");
+                                        if (out_file)
+                                                fclose(out_file);
+                                        fprintf(stderr, "Failed to write '%s': %s\n",
+                                                out_path, strerror(errno));
+                                        exit(EXIT_FAILURE);
                                 }
-                                frame_number++;
                         }
                         if (lc_errs == 0) {
                                 /* raw frame received successfully */
@@ -170,7 +186,7 @@ static void process_image(const void *p, int size)
                         /* indicate a throw-away frame, trying to sync on
                          * correct Lepton 3.x subframe.
                          */
-                        debug_rejected_subframe(p);
+                        debug_rejected_subframe(p, (size_t)size);
                         fflush(stderr);
                         fprintf(stderr, "-");
                 }
@@ -240,7 +256,10 @@ static int read_frame(void)
                         return 0;
                 }
 
-                assert(buf.index < n_buffers);
+                if (buf.index >= n_buffers) {
+                        fprintf(stderr, "Driver returned invalid buffer index %u\n", buf.index);
+                        exit(EXIT_FAILURE);
+                }
 
                 process_image(buffers[buf.index].start, buf.bytesused);
 
@@ -274,7 +293,10 @@ static int read_frame(void)
                             && buf.length == buffers[i].length)
                                 break;
 
-                assert(i < n_buffers);
+                if (i >= n_buffers) {
+                        fprintf(stderr, "Driver returned unknown USERPTR buffer\n");
+                        exit(EXIT_FAILURE);
+                }
 
                 process_image((void *)buf.m.userptr, buf.bytesused);
 
@@ -288,10 +310,6 @@ static int read_frame(void)
 
 static void mainloop(void)
 {
-        unsigned int count;
-
-        count = frame_count;
-
         while (frame_number < frame_count) {
                 for (;;) {
                         fd_set fds;
@@ -671,10 +689,19 @@ static void open_device(void)
                          dev_name, errno, strerror(errno));
                 exit(EXIT_FAILURE);
         }
+
+        if (-1 == fcntl(fd, F_SETFD, FD_CLOEXEC)) {
+                fprintf(stderr, "Cannot set FD_CLOEXEC on '%s': %d, %s\n",
+                         dev_name, errno, strerror(errno));
+                close(fd);
+                fd = -1;
+                exit(EXIT_FAILURE);
+        }
 }
 
 static void usage(FILE *fp, int argc, char **argv)
 {
+        (void)argc;
         fprintf(fp,
                  "Usage: %s [options]\n\n"
                  "Version 1.3\n"
@@ -721,7 +748,6 @@ int main(int argc, char **argv)
         dev_name = "/dev/video0";
 
         for (;;) {
-                FILE *test_f;
                 int idx;
                 int c;
 
@@ -768,15 +794,11 @@ int main(int argc, char **argv)
                 case 'o':
                         out_buf++;
                         out_file_prefix = optarg;
-                        /* make sure the prefix itself is writable */
-                        test_f = fopen(out_file_prefix, "wb");
-                        if (!test_f) {
-                                printf("Cannot open file name prefix '%s' for writing.\n", optarg);
-                                exit(1);
-                        }
-                        fclose(test_f);
-                        /* delete the test file */
-                        unlink(out_file_prefix);
+                        /*
+                         * Do not probe writability by opening the prefix itself:
+                         * that used to truncate and then unlink an existing file.
+                         * The actual frame open reports a precise error safely.
+                         */
                         break;
 
                 case 'f':
@@ -784,20 +806,29 @@ int main(int argc, char **argv)
                         break;
 
                 case 'c':
-                        errno = 0;
-                        frame_count = strtol(optarg, NULL, 0);
-                        if (errno)
-                                errno_exit(optarg);
+                        {
+                                char *end = NULL;
+                                long parsed;
+
+                                errno = 0;
+                                parsed = strtol(optarg, &end, 10);
+                                if (errno || end == optarg || *end != '\0' ||
+                                    parsed <= 0 || parsed > 1000000) {
+                                        fprintf(stderr, "Invalid frame count '%s'\n", optarg);
+                                        exit(EXIT_FAILURE);
+                                }
+                                frame_count = (int)parsed;
+                        }
                         break;
 
                 case 't':
-                        if (strncmp("start", optarg, 5) == 0) {
+                        if (strcmp("start", optarg) == 0) {
                                 telemetry_loc = TELEMETRY_AT_START;
                         }
-                        else if (strncmp("end", optarg, 3) == 0) {
+                        else if (strcmp("end", optarg) == 0) {
                                 telemetry_loc = TELEMETRY_AT_END;
                         }
-                        else if (strncmp("off", optarg, 3) == 0) {
+                        else if (strcmp("off", optarg) == 0) {
                                 telemetry_loc = TELEMETRY_OFF;
                         }
                         else {

@@ -177,14 +177,16 @@ Expected:
 - The Lepton node exists on SPI0 CS0.
 - The Lepton module probes without Oops or DMA mapping errors.
 
-Enable Lepton VSYNC over I2C before capture tests:
+Configure VSYNC, radiometry and the fixed Kelvin-x100 TLinear contract before
+capture tests:
 
 ```sh
-sudo ./lepton_control/rpi_vsync_app
+sudo ./lepton_control/rpi_recovery_app --configure --boot-timeout-ms 6000
 ```
 
-Expected output includes `LEP_SetOemGpioMode result = 0`. If the helper is
-missing, rebuild it from the repository root:
+The legacy `rpi_vsync_app` only configures VSYNC and is not sufficient for a
+radiometric measurement workflow. If the recovery helper is missing, rebuild it
+from the repository root:
 
 ```sh
 make -C lepton_sdk
@@ -205,7 +207,7 @@ The driver exposes read-only counters on the SPI device sysfs directory:
 - `last_spi_status`
 - `transfer_in_flight`
 
-Use `tools/diagnose.sh` to collect the common state without secrets.
+Use `tools/diagnose.sh` to collect common state. It avoids credentials by design, but review diagnostic output before sharing it publicly.
 
 Discard packets such as `2fff` or `5fff` can occur while VoSPI synchronization
 is being acquired. The driver must continue clocking during this phase; a
@@ -230,7 +232,7 @@ sudo reboot
 cd ~/Lepton-Pi5
 sudo modprobe -r lepton
 sudo modprobe lepton xfer_delay_us=500
-sudo ./lepton_control/rpi_vsync_app
+sudo ./lepton_control/rpi_recovery_app --configure --boot-timeout-ms 6000
 ```
 
 If `500` still returns only discard packets, retry with `1000`, `1500`, and
@@ -243,7 +245,7 @@ a signal-integrity diagnostic:
 ```sh
 sudo modprobe -r lepton
 sudo modprobe lepton spi_speed_hz=10000000
-sudo ./lepton_control/rpi_vsync_app
+sudo ./lepton_control/rpi_recovery_app --configure --boot-timeout-ms 6000
 ```
 
 Then retry with `12000000`, `16000000`, and `18000000`. The overlay default is
@@ -271,11 +273,14 @@ Each full frame should be `38400` bytes.
 Convert a raw frame to 16-bit PGM for inspection:
 
 ```sh
-tools/raw_to_pgm.py /tmp/capture/frame_000000.gray --endian little --output /tmp/capture/frame_000000.pgm
+tools/raw_to_pgm.py /tmp/capture/frame_000000.gray --endian big --contract raw --output /tmp/capture/frame_000000.pgm
 ```
 
-The converter reports raw minimum, maximum, center value, and all three values
-in degrees Celsius. It assumes the service's verified Kelvin-x100 contract.
+The legacy collector preserves VoSPI's big-endian pixel byte order and does not
+prove that TLinear/radiometry was configured, so its files are raw by default.
+For temperature conversion, prefer /dev/video10 after
+`rpi_recovery_app --status` reports `temperature_contract=kelvin_x100`, then
+use `--endian little --contract kelvin-x100`.
 
 ## Uninstall
 

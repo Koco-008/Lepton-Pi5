@@ -8,6 +8,32 @@
 
 static int failures;
 
+static uint16_t test_crc16_byte(uint16_t crc, uint8_t value)
+{
+	unsigned int bit;
+	crc ^= (uint16_t)value << 8;
+	for (bit = 0; bit < 8; bit++)
+		crc = (uint16_t)(((crc & 0x8000U) != 0U) ?
+			(((uint16_t)(crc << 1)) ^ (uint16_t)0x1021U) :
+			((uint16_t)(crc << 1)));
+	return crc;
+}
+
+static void set_packet_crc(uint8_t *line)
+{
+	uint16_t crc = 0;
+	unsigned int index;
+	crc = test_crc16_byte(crc, line[0] & 0x0fU);
+	crc = test_crc16_byte(crc, line[1]);
+	crc = test_crc16_byte(crc, 0);
+	crc = test_crc16_byte(crc, 0);
+	for (index = 4; index < LEPTON_SUBFRAME_LINE_BYTE_WIDTH; index++)
+		crc = test_crc16_byte(crc, line[index]);
+	line[2] = (uint8_t)(crc >> 8);
+	line[3] = (uint8_t)crc;
+}
+
+
 #define CHECK(condition)                                                        \
 	do {                                                                      \
 		if (!(condition)) {                                                \
@@ -50,6 +76,7 @@ static void make_subframe(unsigned int segment, uint8_t *subframe)
 			line[byte_offset] = (uint8_t)(value >> 8);
 			line[byte_offset + 1U] = (uint8_t)(value & 0xffU);
 		}
+		set_packet_crc(line);
 	}
 }
 
@@ -159,6 +186,20 @@ static void test_rejection_and_resync(void)
 	CHECK(assembler.last_reject == LEPTON_REJECT_PACKET_ID);
 }
 
+static void test_crc_rejection(void)
+{
+	struct lepton_frame_assembler assembler;
+	uint8_t subframe[LEPTON_SUBFRAME_SIZE];
+	uint16_t frame[LEPTON_FRAME_PIXELS];
+
+	lepton_frame_assembler_init(&assembler);
+	make_subframe(1, subframe);
+	subframe[21] ^= 0x01U;
+	CHECK(lepton_frame_assembler_push(&assembler, subframe, sizeof(subframe), frame) ==
+	      LEPTON_ASSEMBLE_REJECTED);
+	CHECK(assembler.last_reject == LEPTON_REJECT_CRC);
+}
+
 static void test_palette_and_serialization(void)
 {
 	struct lepton_frame_range range = { .minimum = 100, .maximum = 200 };
@@ -200,6 +241,7 @@ int main(void)
 	test_complete_frame();
 	test_invalid_frame_cadence();
 	test_rejection_and_resync();
+	test_crc_rejection();
 	test_palette_and_serialization();
 
 	if (failures != 0) {

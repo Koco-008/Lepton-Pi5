@@ -661,6 +661,7 @@ LEP_RESULT LEP_RunOemFFCNormalization( LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
 {
    LEP_RESULT result = LEP_OK;
    LEP_OEM_STATUS_E oemStatus = LEP_OEM_STATUS_BUSY;
+   LEP_UINT16 timeoutCount = 1000;
 
    result = LEP_SetOemFFCNormalizationTarget( portDescPtr, ffcTarget );
    if( result == LEP_OK )
@@ -668,7 +669,11 @@ LEP_RESULT LEP_RunOemFFCNormalization( LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
       result = LEP_RunCommand( portDescPtr, ( LEP_COMMAND_ID )LEP_CID_OEM_FFC_NORMALIZATION_TARGET );
       while( oemStatus == LEP_OEM_STATUS_BUSY )
       {
-         LEP_GetOemCalStatus( portDescPtr, &oemStatus );
+         result = LEP_GetOemCalStatus( portDescPtr, &oemStatus );
+         if( result != LEP_OK )
+            return( result );
+         if( oemStatus == LEP_OEM_STATUS_BUSY && timeoutCount-- == 0 )
+            return( LEP_TIMEOUT_ERROR );
       }
    }
 
@@ -680,11 +685,19 @@ LEP_RESULT LEP_RunOemFFC( LEP_CAMERA_PORT_DESC_T_PTR portDescPtr )
 {
    LEP_RESULT result = LEP_OK;
    LEP_OEM_STATUS_E oemStatus = LEP_OEM_STATUS_BUSY;
+   LEP_UINT16 timeoutCount = 1000;
 
    result = LEP_RunCommand( portDescPtr, ( LEP_COMMAND_ID )LEP_CID_OEM_FFC_NORMALIZATION_TARGET );
-   while( oemStatus == LEP_OEM_STATUS_BUSY )
+   if( result == LEP_OK )
    {
-      LEP_GetOemCalStatus( portDescPtr, &oemStatus );
+      while( oemStatus == LEP_OEM_STATUS_BUSY )
+      {
+         result = LEP_GetOemCalStatus( portDescPtr, &oemStatus );
+         if( result != LEP_OK )
+            return( result );
+         if( oemStatus == LEP_OEM_STATUS_BUSY && timeoutCount-- == 0 )
+            return( LEP_TIMEOUT_ERROR );
+      }
    }
 
    return( result );

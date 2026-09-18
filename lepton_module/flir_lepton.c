@@ -162,29 +162,6 @@ static int lepton_set_fmt_fields(struct lepton *lep, struct v4l2_format *f)
 	pix->sizeimage = lep->lep_vospi_info.subframe_params.subframe_data_byte_size;
 	return 0;
 }
-static int lepton_s_parm(struct file *file, void *priv,
-			     struct v4l2_streamparm *parm)
-{
-	if (parm->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		return -EINVAL;
-
-	parm->parm.capture.timeperframe.numerator = 1;
-	parm->parm.capture.timeperframe.denominator = 30;
-	parm->parm.capture.readbuffers  = 1;
-
-	return 0;
-}
-static int lepton_g_parm(struct file *file, void *priv,
-			     struct v4l2_streamparm *parm)
-{
-	if (parm->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		return -EINVAL;
-
-	parm->parm.capture.timeperframe.numerator = 1;
-	parm->parm.capture.timeperframe.denominator = 30;
-	parm->parm.capture.readbuffers  = 1;
-	return 0;
-}
 static int lepton_g_fmt_vid_cap(struct file *file, void *priv,
 			     struct v4l2_format *f)
 {
@@ -215,17 +192,6 @@ static int lepton_s_fmt_vid_cap(struct file *file, void *priv,
 	lepton_set_fmt_fields(lep, f);
 	return 0;
 }
-static int lepton_enum_frameintervals(struct file *file, void *priv,
-				   struct v4l2_frmivalenum *f)
-{
-	if (f->index != 0)
-		return -EINVAL;
-	f->type = V4L2_FRMIVAL_TYPE_DISCRETE;
-	// always runs at 30Hz
-	f->discrete.numerator = 1;
-	f->discrete.denominator = 30;
-	return 0;
-}
 static int lepton_enum_framesizes(struct file *file, void *priv,
 			       struct v4l2_frmsizeenum *f)
 {
@@ -251,8 +217,6 @@ static struct v4l2_file_operations lepton_fops = {
 };
 
 static const struct v4l2_ioctl_ops lepton_ioctl_ops = {
-	.vidioc_s_parm			= lepton_s_parm,
-	.vidioc_g_parm			= lepton_g_parm,
 	.vidioc_querycap	= lepton_querycap,
 	.vidioc_enum_input	= lepton_enum_input,
 	.vidioc_g_input		= lepton_g_input,
@@ -266,7 +230,6 @@ static const struct v4l2_ioctl_ops lepton_ioctl_ops = {
 	.vidioc_g_fmt_vid_cap	= lepton_g_fmt_vid_cap,
 	.vidioc_try_fmt_vid_cap	= lepton_try_fmt_vid_cap,
 	.vidioc_s_fmt_vid_cap	= lepton_s_fmt_vid_cap,
-	.vidioc_enum_frameintervals	= lepton_enum_frameintervals,
 	.vidioc_enum_framesizes		= lepton_enum_framesizes,
 
 	.vidioc_reqbufs		= vb2_ioctl_reqbufs,
@@ -663,6 +626,9 @@ static irqreturn_t lepton_vsync_handler(int irq, void *data)
 	if (lep->started && !list_empty(&lep->unfilled_bufs)) {
 		lep_buf = list_first_entry(&lep->unfilled_bufs, struct lepton_buffer, list);
 		list_del(&lep_buf->list);
+		lep_buf->vb.sequence = (u32)(lep->vsync_count - 1);
+		lep_buf->vb.field = V4L2_FIELD_NONE;
+		lep_buf->vb.vb2_buf.timestamp = ktime_get_ns();
 		lep->current_lep_buf = lep_buf;
 	}
 	synced = lep->synced;  /* cache this for use outside spinlock */
@@ -983,9 +949,12 @@ static void lepton_remove(struct spi_device *spi)
 		synchronize_irq(lep->irq);
 	}
 
-	if (!wait_event_timeout(lep->xfer_wait, !READ_ONCE(lep->transfer_in_flight),
-				msecs_to_jiffies(1000)))
-		dev_warn(&spi->dev, "timed out waiting for SPI transfer completion\n");
+	/*
+	 * The async SPI callback still references devm-managed memory. IRQs are
+	 * disabled above, so no new request can start; drain the final request
+	 * completely before remove() returns and devm releases that memory.
+	 */
+	wait_event(lep->xfer_wait, !READ_ONCE(lep->transfer_in_flight));
 
 	/* tear down the things that are not "devm" (device-managed) */
 	video_unregister_device(lep->vid_dev);

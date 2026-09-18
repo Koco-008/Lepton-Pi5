@@ -1,6 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "frame_pipeline.h"
+#include "LEPTON_SDK.h"
+#include "LEPTON_SYS.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -57,6 +59,7 @@ struct output_device {
 	struct mapped_buffer *buffers;
 	unsigned int buffer_count;
 	size_t frame_size;
+	unsigned int next_unused_buffer;
 	bool streaming;
 };
 
@@ -503,7 +506,6 @@ static int open_output(
 	struct v4l2_format format = { 0 };
 	struct v4l2_requestbuffers request = { 0 };
 	struct v4l2_streamparm stream_parameters = { 0 };
-	enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
 	uint32_t caps;
 	unsigned int index;
 	char fourcc[5];
@@ -620,13 +622,6 @@ static int open_output(
 		}
 	}
 
-	/* Claim the output stream before queueing data so capture clients can
-	 * negotiate immediately, while invalid VoSPI input still emits no frame. */
-	if (xioctl(output->fd, VIDIOC_STREAMON, &type) != 0) {
-		fprintf(stderr, "%s: VIDIOC_STREAMON: %s\n", path, strerror(errno));
-		goto fail;
-	}
-	output->streaming = true;
 
 	if (verify_capture_view(path, width, height, pixel_format) != 0) {
 		fprintf(stderr, "%s is not usable as a capture device: %s\n",
@@ -644,9 +639,10 @@ fail:
 }
 
 static int write_output_frame(
-	const struct output_device *output,
+	struct output_device *output,
 	const void *frame,
-	size_t frame_size)
+	size_t frame_size,
+	const struct timeval *timestamp)
 {
 	unsigned int attempt;
 	struct v4l2_buffer buffer = {
@@ -654,35 +650,38 @@ static int write_output_frame(
 		.memory = V4L2_MEMORY_MMAP,
 	};
 
-	if (!output->streaming || output->buffer_count == 0 ||
-	    frame_size != output->frame_size) {
+	if (output->buffer_count == 0 || frame_size != output->frame_size) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	for (attempt = 0; attempt < 3; attempt++) {
-		if (xioctl(output->fd, VIDIOC_DQBUF, &buffer) == 0)
-			break;
-		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			struct pollfd poll_fd = {
-				.fd = output->fd,
-				.events = POLLOUT,
-			};
-			int poll_result = poll(&poll_fd, 1, OUTPUT_POLL_TIMEOUT_MS);
+	if (output->next_unused_buffer < output->buffer_count) {
+		buffer.index = output->next_unused_buffer++;
+	} else {
+		for (attempt = 0; attempt < 3; attempt++) {
+			if (xioctl(output->fd, VIDIOC_DQBUF, &buffer) == 0)
+				break;
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				struct pollfd poll_fd = {
+					.fd = output->fd,
+					.events = POLLOUT,
+				};
+				int poll_result = poll(&poll_fd, 1, OUTPUT_POLL_TIMEOUT_MS);
 
-			if (poll_result > 0)
-				continue;
-			if (poll_result == 0)
-				errno = ETIMEDOUT;
+				if (poll_result > 0)
+					continue;
+				if (poll_result == 0)
+					errno = ETIMEDOUT;
+				return -1;
+			}
 			return -1;
 		}
-		return -1;
+		if (attempt == 3) {
+			errno = EAGAIN;
+			return -1;
+		}
 	}
 
-	if (attempt == 3) {
-		errno = EAGAIN;
-		return -1;
-	}
 	if (buffer.index >= output->buffer_count ||
 	    output->buffers[buffer.index].length < frame_size) {
 		errno = EPROTO;
@@ -692,12 +691,20 @@ static int write_output_frame(
 	memcpy(output->buffers[buffer.index].address, frame, frame_size);
 	buffer.bytesused = (uint32_t)frame_size;
 	buffer.field = V4L2_FIELD_NONE;
-	buffer.timestamp.tv_sec = 0;
-	buffer.timestamp.tv_usec = 0;
-	buffer.flags &= ~V4L2_BUF_FLAG_TIMESTAMP_COPY;
+	if (timestamp != NULL) {
+		buffer.timestamp = *timestamp;
+		buffer.flags |= V4L2_BUF_FLAG_TIMESTAMP_COPY;
+	}
 	if (xioctl(output->fd, VIDIOC_QBUF, &buffer) != 0)
 		return -1;
 
+	if (!output->streaming) {
+		enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+
+		if (xioctl(output->fd, VIDIOC_STREAMON, &type) != 0)
+			return -1;
+		output->streaming = true;
+	}
 	return 0;
 }
 
@@ -708,6 +715,23 @@ static uint64_t monotonic_milliseconds(void)
 	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
 		return 0;
 	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+}
+
+static int measurement_frame_is_valid(LEP_CAMERA_PORT_DESC_T *port,
+	uint64_t *ffc_dropped_frames)
+{
+	LEP_SYS_STATUS_E status = LEP_SYS_STATUS_ERROR;
+	LEP_RESULT result = LEP_GetSysFFCStatus(port, &status);
+
+	if (result != LEP_OK) {
+		fprintf(stderr, "LEP_GetSysFFCStatus failed: %d\n", result);
+		return -1;
+	}
+	if (status != LEP_SYS_STATUS_READY) {
+		(*ffc_dropped_frames)++;
+		return 0;
+	}
+	return 1;
 }
 
 static void log_rejected_subframe(
@@ -744,10 +768,12 @@ static int process_capture_buffer(
 	uint8_t raw_y16le[LEPTON_Y16_FRAME_BYTES],
 	uint8_t *color_yuyv,
 	const struct options *options,
-	const struct output_device *raw_output,
-	const struct output_device *color_output,
+	struct output_device *raw_output,
+	struct output_device *color_output,
+	LEP_CAMERA_PORT_DESC_T *control_port,
 	struct lepton_frame_range *range,
-	uint64_t *published_frames)
+	uint64_t *published_frames,
+	uint64_t *ffc_dropped_frames)
 {
 	const uint8_t *subframe;
 	size_t bytes_used;
@@ -783,6 +809,12 @@ static int process_capture_buffer(
 	if (result != LEPTON_ASSEMBLE_FRAME_READY)
 		return 0;
 
+	result = measurement_frame_is_valid(control_port, ffc_dropped_frames);
+	if (result < 0)
+		return -1;
+	if (result == 0)
+		return 0;
+
 	lepton_frame_to_y16le(raw_frame, raw_y16le);
 	if (lepton_render_false_color_yuyv(
 			raw_frame, color_yuyv, options->color_width,
@@ -792,13 +824,13 @@ static int process_capture_buffer(
 	}
 
 	if (write_output_frame(raw_output, raw_y16le,
-			       LEPTON_Y16_FRAME_BYTES) != 0) {
+			       LEPTON_Y16_FRAME_BYTES, &buffer->timestamp) != 0) {
 		fprintf(stderr, "%s: write: %s\n",
 			raw_output->path, strerror(errno));
 		return -1;
 	}
 	if (write_output_frame(color_output, color_yuyv,
-			       color_output->frame_size) != 0) {
+			       color_output->frame_size, &buffer->timestamp) != 0) {
 		fprintf(stderr, "%s: write: %s\n",
 			color_output->path, strerror(errno));
 		return -1;
@@ -815,11 +847,14 @@ static int run_streamer(const struct options *options)
 	struct output_device color_output = { .fd = -1 };
 	struct lepton_frame_assembler assembler;
 	struct lepton_frame_range range = { 0 };
+	LEP_CAMERA_PORT_DESC_T control_port;
+	bool control_port_open = false;
 	uint16_t *raw_frame = NULL;
 	uint8_t *raw_y16le = NULL;
 	uint8_t *color_yuyv = NULL;
 	size_t color_size;
 	uint64_t published_frames = 0;
+	uint64_t ffc_dropped_frames = 0;
 	uint64_t last_frame_ms;
 	uint64_t last_status_ms;
 	int return_code = STREAMER_ERROR;
@@ -840,6 +875,12 @@ static int run_streamer(const struct options *options)
 	}
 
 	lepton_frame_assembler_init(&assembler);
+	memset(&control_port, 0, sizeof(control_port));
+	if (LEP_OpenPort(1, LEP_CCI_TWI, 400, &control_port) != LEP_OK) {
+		fprintf(stderr, "Unable to open Lepton CCI port for FFC validity guard\n");
+		goto done;
+	}
+	control_port_open = true;
 	if (open_output(&raw_output, options->raw_path,
 			LEPTON_FRAME_WIDTH, LEPTON_FRAME_HEIGHT,
 			V4L2_PIX_FMT_Y16, V4L2_COLORSPACE_RAW) != 0)
@@ -912,7 +953,8 @@ static int run_streamer(const struct options *options)
 		if (process_capture_buffer(
 				&capture, &buffer, &assembler, raw_frame, raw_y16le,
 				color_yuyv, options, &raw_output, &color_output,
-				&range, &published_frames) != 0) {
+				&control_port, &range, &published_frames,
+				&ffc_dropped_frames) != 0) {
 			(void)xioctl(capture.fd, VIDIOC_QBUF, &buffer);
 			goto done;
 		}
@@ -938,11 +980,12 @@ static int run_streamer(const struct options *options)
 		if (!options->quiet &&
 		    now_ms - last_status_ms >= 2000U) {
 			fprintf(stderr,
-				"frames=%llu accepted=%llu skipped=%llu rejected=%llu min=%u max=%u\n",
+				"frames=%llu accepted=%llu skipped=%llu rejected=%llu ffc_dropped=%llu min=%u max=%u\n",
 				(unsigned long long)published_frames,
 				(unsigned long long)assembler.accepted_subframes,
 				(unsigned long long)assembler.skipped_subframes,
 				(unsigned long long)assembler.rejected_subframes,
+				(unsigned long long)ffc_dropped_frames,
 				range.minimum, range.maximum);
 			last_status_ms = now_ms;
 		}
@@ -954,6 +997,8 @@ done:
 	close_capture(&capture);
 	close_output(&color_output);
 	close_output(&raw_output);
+	if (control_port_open)
+		(void)LEP_ClosePort(&control_port);
 	free(color_yuyv);
 	free(raw_y16le);
 	free(raw_frame);
