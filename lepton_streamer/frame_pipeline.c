@@ -10,8 +10,9 @@ static uint16_t lepton_crc16_byte(uint16_t crc, uint8_t value)
 
 	crc ^= (uint16_t)value << 8;
 	for (bit = 0; bit < 8; bit++)
-		crc = (uint16_t)((crc & 0x8000U) ?
-			((crc << 1) ^ 0x1021U) : (crc << 1));
+		crc = (uint16_t)(((crc & 0x8000U) != 0U) ?
+			(((uint16_t)(crc << 1)) ^ (uint16_t)0x1021U) :
+			((uint16_t)(crc << 1)));
 	return crc;
 }
 
