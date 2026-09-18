@@ -2,20 +2,26 @@
 Description=FLIR Lepton raw and false-color video streams
 After=systemd-modules-load.service
 Wants=systemd-modules-load.service
-StartLimitIntervalSec=0
+StartLimitIntervalSec=60
+StartLimitBurst=10
 
 [Service]
 Type=simple
 ExecStartPre=/usr/local/libexec/lepton/rpi_recovery_app --configure --boot-timeout-ms 6000
 ExecStart=/usr/local/bin/lepton_streamer --input /dev/lepton-vspi --raw-output /dev/video10 --color-output /dev/video11 --color-width 640 --color-height 480 --stall-timeout 8
 ExecStopPost=/usr/local/libexec/lepton/recover_lepton_rpi5.sh
-Restart=always
+Restart=on-failure
 RestartSec=2
 TimeoutStopSec=30
 NoNewPrivileges=true
 ProtectHome=true
 ProtectSystem=full
 PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target
