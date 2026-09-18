@@ -32,7 +32,13 @@ def parse_args() -> argparse.Namespace:
         "--endian",
         choices=("little", "big"),
         default="little",
-        help="Input uint16 byte order. Default: little.",
+        help="Input uint16 byte order. /dev/video10 is little; legacy collector files are big.",
+    )
+    parser.add_argument(
+        "--contract",
+        choices=("raw", "kelvin-x100"),
+        default="raw",
+        help="Interpret samples as raw values or verified TLinear Kelvin x100.",
     )
     return parser.parse_args()
 
@@ -70,13 +76,14 @@ def main() -> None:
     print(f"width={WIDTH}")
     print(f"height={HEIGHT}")
     print(f"endian={args.endian}")
-    print("temperature_contract=kelvin_x100")
+    print(f"temperature_contract={args.contract}")
     print(f"min={minimum}")
     print(f"max={maximum}")
     print(f"center={center}")
-    print(f"min_celsius={kelvin_x100_to_celsius(minimum):.2f}")
-    print(f"max_celsius={kelvin_x100_to_celsius(maximum):.2f}")
-    print(f"center_celsius={kelvin_x100_to_celsius(center):.2f}")
+    if args.contract == "kelvin-x100":
+        print(f"min_celsius={kelvin_x100_to_celsius(minimum):.2f}")
+        print(f"max_celsius={kelvin_x100_to_celsius(maximum):.2f}")
+        print(f"center_celsius={kelvin_x100_to_celsius(center):.2f}")
     if args.output:
         write_pgm(args.output, pixels)
         print(f"pgm={args.output}")
