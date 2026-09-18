@@ -145,6 +145,13 @@ fi
 if systemctl cat lepton-streamer.service >/dev/null 2>&1; then
 	run systemctl stop lepton-streamer.service
 fi
+if ! getent group lepton >/dev/null 2>&1; then
+	run groupadd --system lepton
+fi
+if ! id lepton >/dev/null 2>&1; then
+	run useradd --system --gid lepton --home-dir /nonexistent --shell /usr/sbin/nologin lepton
+fi
+run usermod -a -G video,i2c lepton
 run install -D -m 0755 "$streamer" /usr/local/bin/lepton_streamer
 run install -D -m 0755 "$vsync_helper" /usr/local/libexec/lepton/rpi_vsync_app
 run install -D -m 0755 "$recovery_helper" /usr/local/libexec/lepton/rpi_recovery_app
