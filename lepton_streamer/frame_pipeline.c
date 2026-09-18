@@ -4,6 +4,46 @@
 #include <limits.h>
 #include <string.h>
 
+static uint16_t lepton_crc16_byte(uint16_t crc, uint8_t value)
+{
+	unsigned int bit;
+
+	crc ^= (uint16_t)value << 8;
+	for (bit = 0; bit < 8; bit++)
+		crc = (uint16_t)((crc & 0x8000U) ?
+			((crc << 1) ^ 0x1021U) : (crc << 1));
+	return crc;
+}
+
+static int packet_crc_is_valid(const uint8_t *line)
+{
+	uint16_t crc = 0;
+	uint16_t expected = ((uint16_t)line[2] << 8) | line[3];
+	unsigned int index;
+
+	crc = lepton_crc16_byte(crc, line[0] & 0x0fU);
+	crc = lepton_crc16_byte(crc, line[1]);
+	crc = lepton_crc16_byte(crc, 0);
+	crc = lepton_crc16_byte(crc, 0);
+	for (index = 4; index < LEPTON_SUBFRAME_LINE_BYTE_WIDTH; index++)
+		crc = lepton_crc16_byte(crc, line[index]);
+	return crc == expected;
+}
+
+static int packet_crcs_are_valid(const uint8_t *subframe)
+{
+	int line_index;
+
+	for (line_index = 0; line_index < LEPTON_SUBFRAME_DATA_LINE_HEIGHT;
+	     line_index++) {
+		const uint8_t *line = subframe +
+			line_index * LEPTON_SUBFRAME_LINE_BYTE_WIDTH;
+		if (!packet_crc_is_valid(line))
+			return 0;
+	}
+	return 1;
+}
+
 static int packet_ids_are_valid(const uint8_t *subframe)
 {
 	int line_index;
@@ -63,6 +103,10 @@ enum lepton_assemble_result lepton_frame_assembler_push(
 
 	if (!packet_ids_are_valid(bytes)) {
 		assembler->last_reject = LEPTON_REJECT_PACKET_ID;
+		goto reject;
+	}
+	if (!packet_crcs_are_valid(bytes)) {
+		assembler->last_reject = LEPTON_REJECT_CRC;
 		goto reject;
 	}
 
@@ -129,6 +173,8 @@ const char *lepton_reject_reason_name(enum lepton_reject_reason reason)
 		return "discard";
 	case LEPTON_REJECT_PACKET_ID:
 		return "packet-id";
+	case LEPTON_REJECT_CRC:
+		return "crc";
 	case LEPTON_REJECT_SEGMENT:
 		return "segment-order";
 	case LEPTON_REJECT_EXTRACTION:
