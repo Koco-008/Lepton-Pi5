@@ -57,6 +57,7 @@ struct output_device {
 	struct mapped_buffer *buffers;
 	unsigned int buffer_count;
 	size_t frame_size;
+	unsigned int next_unused_buffer;
 	bool streaming;
 };
 
@@ -503,7 +504,6 @@ static int open_output(
 	struct v4l2_format format = { 0 };
 	struct v4l2_requestbuffers request = { 0 };
 	struct v4l2_streamparm stream_parameters = { 0 };
-	enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
 	uint32_t caps;
 	unsigned int index;
 	char fourcc[5];
@@ -620,13 +620,6 @@ static int open_output(
 		}
 	}
 
-	/* Claim the output stream before queueing data so capture clients can
-	 * negotiate immediately, while invalid VoSPI input still emits no frame. */
-	if (xioctl(output->fd, VIDIOC_STREAMON, &type) != 0) {
-		fprintf(stderr, "%s: VIDIOC_STREAMON: %s\n", path, strerror(errno));
-		goto fail;
-	}
-	output->streaming = true;
 
 	if (verify_capture_view(path, width, height, pixel_format) != 0) {
 		fprintf(stderr, "%s is not usable as a capture device: %s\n",
@@ -644,9 +637,10 @@ fail:
 }
 
 static int write_output_frame(
-	const struct output_device *output,
+	struct output_device *output,
 	const void *frame,
-	size_t frame_size)
+	size_t frame_size,
+	const struct timeval *timestamp)
 {
 	unsigned int attempt;
 	struct v4l2_buffer buffer = {
@@ -654,35 +648,38 @@ static int write_output_frame(
 		.memory = V4L2_MEMORY_MMAP,
 	};
 
-	if (!output->streaming || output->buffer_count == 0 ||
-	    frame_size != output->frame_size) {
+	if (output->buffer_count == 0 || frame_size != output->frame_size) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	for (attempt = 0; attempt < 3; attempt++) {
-		if (xioctl(output->fd, VIDIOC_DQBUF, &buffer) == 0)
-			break;
-		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			struct pollfd poll_fd = {
-				.fd = output->fd,
-				.events = POLLOUT,
-			};
-			int poll_result = poll(&poll_fd, 1, OUTPUT_POLL_TIMEOUT_MS);
+	if (output->next_unused_buffer < output->buffer_count) {
+		buffer.index = output->next_unused_buffer++;
+	} else {
+		for (attempt = 0; attempt < 3; attempt++) {
+			if (xioctl(output->fd, VIDIOC_DQBUF, &buffer) == 0)
+				break;
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				struct pollfd poll_fd = {
+					.fd = output->fd,
+					.events = POLLOUT,
+				};
+				int poll_result = poll(&poll_fd, 1, OUTPUT_POLL_TIMEOUT_MS);
 
-			if (poll_result > 0)
-				continue;
-			if (poll_result == 0)
-				errno = ETIMEDOUT;
+				if (poll_result > 0)
+					continue;
+				if (poll_result == 0)
+					errno = ETIMEDOUT;
+				return -1;
+			}
 			return -1;
 		}
-		return -1;
+		if (attempt == 3) {
+			errno = EAGAIN;
+			return -1;
+		}
 	}
 
-	if (attempt == 3) {
-		errno = EAGAIN;
-		return -1;
-	}
 	if (buffer.index >= output->buffer_count ||
 	    output->buffers[buffer.index].length < frame_size) {
 		errno = EPROTO;
@@ -692,12 +689,20 @@ static int write_output_frame(
 	memcpy(output->buffers[buffer.index].address, frame, frame_size);
 	buffer.bytesused = (uint32_t)frame_size;
 	buffer.field = V4L2_FIELD_NONE;
-	buffer.timestamp.tv_sec = 0;
-	buffer.timestamp.tv_usec = 0;
-	buffer.flags &= ~V4L2_BUF_FLAG_TIMESTAMP_COPY;
+	if (timestamp != NULL) {
+		buffer.timestamp = *timestamp;
+		buffer.flags |= V4L2_BUF_FLAG_TIMESTAMP_COPY;
+	}
 	if (xioctl(output->fd, VIDIOC_QBUF, &buffer) != 0)
 		return -1;
 
+	if (!output->streaming) {
+		enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+
+		if (xioctl(output->fd, VIDIOC_STREAMON, &type) != 0)
+			return -1;
+		output->streaming = true;
+	}
 	return 0;
 }
 
@@ -792,13 +797,13 @@ static int process_capture_buffer(
 	}
 
 	if (write_output_frame(raw_output, raw_y16le,
-			       LEPTON_Y16_FRAME_BYTES) != 0) {
+			       LEPTON_Y16_FRAME_BYTES, &buffer->timestamp) != 0) {
 		fprintf(stderr, "%s: write: %s\n",
 			raw_output->path, strerror(errno));
 		return -1;
 	}
 	if (write_output_frame(color_output, color_yuyv,
-			       color_output->frame_size) != 0) {
+			       color_output->frame_size, &buffer->timestamp) != 0) {
 		fprintf(stderr, "%s: write: %s\n",
 			color_output->path, strerror(errno));
 		return -1;
