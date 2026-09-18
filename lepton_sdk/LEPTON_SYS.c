@@ -602,11 +602,19 @@ LEP_RESULT LEP_RunSysFFCNormalization( LEP_CAMERA_PORT_DESC_T_PTR portDescPtr )
 {
    LEP_RESULT result = LEP_OK;
    LEP_SYS_STATUS_E sysStatus = LEP_SYS_STATUS_BUSY;
+   LEP_UINT16 timeoutCount = 1000;
 
    result = LEP_RunCommand( portDescPtr, ( LEP_COMMAND_ID )FLR_CID_SYS_RUN_FFC );
-   while( sysStatus == LEP_SYS_STATUS_BUSY )
+   if( result == LEP_OK )
    {
-      LEP_GetSysFFCStatus( portDescPtr, &sysStatus );
+      while( sysStatus == LEP_SYS_STATUS_BUSY )
+      {
+         result = LEP_GetSysFFCStatus( portDescPtr, &sysStatus );
+         if( result != LEP_OK )
+            return( result );
+         if( sysStatus == LEP_SYS_STATUS_BUSY && timeoutCount-- == 0 )
+            return( LEP_TIMEOUT_ERROR );
+      }
    }
 
    return( result );
