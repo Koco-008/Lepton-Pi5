@@ -173,14 +173,18 @@ LEP_RESULT LEP_RunRadFFC( LEP_CAMERA_PORT_DESC_T_PTR portDescPtr )
 {
    LEP_RESULT result = LEP_OK;
    LEP_RAD_STATUS_E radStatus = LEP_RAD_STATUS_BUSY;
+   LEP_UINT16 timeoutCount = 1000;
 
    result = LEP_RunCommand( portDescPtr, ( LEP_COMMAND_ID )LEP_CID_RAD_RUN_FFC );
    if( result == LEP_OK )
    {
-      //TODO: Add timeout check
       while( radStatus == LEP_RAD_STATUS_BUSY )
       {
-         LEP_GetRadRunStatus( portDescPtr, &radStatus );
+         result = LEP_GetRadRunStatus( portDescPtr, &radStatus );
+         if( result != LEP_OK )
+            return( result );
+         if( radStatus == LEP_RAD_STATUS_BUSY && timeoutCount-- == 0 )
+            return( LEP_TIMEOUT_ERROR );
       }
    }
    return( result );

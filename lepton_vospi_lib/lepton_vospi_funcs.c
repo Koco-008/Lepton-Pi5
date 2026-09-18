@@ -44,7 +44,7 @@ int init_lepton_info(lepton_vospi_info *lep_info, lepton_version lep_version, te
 		/* 4 subframes per frame, start counter at 1 */
 		lep_info->next_subframe_index = 1;
 	}
-	lep_info->subframe_params.line_count = lep_info->image_params.pixel_height;
+	lep_info->subframe_params.line_count = LEPTON_SUBFRAME_DATA_LINE_HEIGHT;
 	/* SPI xfer bytes per subframe, without telemetry */
 	lep_info->subframe_params.subframe_data_byte_size = LEPTON_SUBFRAME_SIZE;
 	lep_info->telemetry_loc = TELEMETRY_OFF;
@@ -66,7 +66,7 @@ int init_lepton_info(lepton_vospi_info *lep_info, lepton_version lep_version, te
 			 * size)
 			 */
 			lep_info->subframe_params.subframe_data_byte_size += LEPTON3_TELEMETRY_SUBFRAME_SIZE;
-			lep_info->subframe_params.line_count += LEPTON3_TELEMETRY_SUBFRAME_SIZE;
+			lep_info->subframe_params.line_count += LEPTON3_TELEMETRY_SUBFRAME_LINE_HEIGHT;
 		}
 	}
 	return 0;
@@ -96,13 +96,19 @@ int is_subframe_line_counter_valid(lepton_vospi_info *lep_info, unsigned short *
 	return valid;
 }
 
+int is_discard_packet(unsigned short *subframe_data) {
+	unsigned char *first_line = get_line_from_subframe(subframe_data, 0);
+
+	return (first_line[0] & 0x0f) == 0x0f;
+}
+
 /*
  * Given a pointer to 16-bit sub-frame data from a Lepton 3.x, collect the
  * embedded sub-frame index.
  */
-int get_subframe_index_from_subframe(unsigned short *subframe_data) {
+static unsigned int get_subframe_index_from_subframe(unsigned short *subframe_data) {
 	unsigned char *subframe_byte_base = NULL;
-	int subframe_index = 0;
+	unsigned int subframe_index = 0;
 
 	subframe_byte_base = get_line_from_subframe(subframe_data, LEPTON3_SUBFRAME_INDEX_LINE1);
 	subframe_index = (subframe_byte_base[LEPTON3_SUBFRAME_INDEX_BYTE] & LEPTON3_SUBFRAME_INDEX_LINE1_BYTE1_MASK) >> 4;
@@ -116,11 +122,12 @@ int get_subframe_index_from_subframe(unsigned short *subframe_data) {
  * Given a lepton_vospi_info struct pointer and a pointer to 16-bit sub-frame
  * data, find the subframe index (1-based).
  *
- * Always return 0 for Lepton 2.X. Return 0 for Lepton 3.X only for duplicate
+ * Always return 0 for Lepton 2.X. Return 0 for Lepton 3.X partial invalid
  * frames.
  */
-int get_subframe_index(lepton_vospi_info *lep_info, unsigned short *subframe_data) {
-	int sidx = 0;
+unsigned int lepton_get_subframe_index(lepton_vospi_info *lep_info,
+				       unsigned short *subframe_data) {
+	unsigned int sidx = 0;
 
 	if (lep_info->lep_version != LEPTON_VERSION_2X) {
 		sidx = get_subframe_index_from_subframe(subframe_data);
@@ -130,9 +137,9 @@ int get_subframe_index(lepton_vospi_info *lep_info, unsigned short *subframe_dat
 
 int is_subframe_index_valid(lepton_vospi_info *lep_info, unsigned short *subframe_data) {
 	int valid = 0;
-	int sidx = 0;
+	unsigned int sidx = 0;
 
-	sidx = get_subframe_index(lep_info, subframe_data);
+	sidx = lepton_get_subframe_index(lep_info, subframe_data);
 	if (sidx == lep_info->next_subframe_index) {
 		valid = 1;
 		if (lep_info->next_subframe_index > 0) {
@@ -217,4 +224,6 @@ int extract_pixel_data(lepton_vospi_info *lep_info, unsigned short *received_fra
 EXPORT_SYMBOL(init_lepton_info);
 EXPORT_SYMBOL(get_line_from_subframe);
 EXPORT_SYMBOL(is_subframe_line_counter_valid);
+EXPORT_SYMBOL(is_discard_packet);
+EXPORT_SYMBOL(lepton_get_subframe_index);
 #endif

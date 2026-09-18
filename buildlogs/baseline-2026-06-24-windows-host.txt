@@ -1,0 +1,49 @@
+Baseline build attempt for Raspberry Pi 5 kernel 6.18 port
+Date: 2026-06-24
+Repository base commit: 6f92303aa148ad1505622fbc9ebc6899a69be3e2
+Branch: rpi5-kernel-6.18
+
+Requested target build command:
+
+  make -C /lib/modules/6.18.34+rpt-rpi-2712/build M="$PWD" modules
+
+Result on this Codex Windows workstation:
+
+  Not run to completion. This host is not the Raspberry Pi target and does not
+  have the target Linux kernel headers mounted at:
+
+    /lib/modules/6.18.34+rpt-rpi-2712/build
+
+  PowerShell checks:
+
+    Get-Command make -All
+    -> make was not found on PATH
+
+    Test-Path '/lib/modules/6.18.34+rpt-rpi-2712/build'
+    -> False
+
+Baseline error categories expected from source inspection before the port:
+
+  SPI API:
+    - old spi->master access
+    - manual spi_message.is_dma_mapped
+    - manual spi_transfer.rx_dma
+
+  Videobuf2/V4L2:
+    - q->min_buffers_needed removed in newer kernels
+    - old direct vb2_buffer embedding instead of vb2_v4l2_buffer
+    - DMA-contig V4L2 buffers used as direct SPI DMA targets
+
+  String/API removals:
+    - strlcpy used in querycap
+    - cap->card copied with sizeof(cap->driver), not sizeof(cap->card)
+
+  Callback signatures:
+    - spi_driver.remove returned int; Linux 6.18 expects void
+
+  Device/memory:
+    - V4L2 buffer memory and SPI DMA mapping were coupled
+    - private persistent SPI capture buffer was not the sole SPI receive target
+
+The authoritative baseline build must be repeated on the Raspberry Pi 5 with
+the installed headers before installing the module.

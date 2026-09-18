@@ -176,6 +176,7 @@ LEP_RESULT LEP_I2C_GetAttribute(LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
     LEP_INT16 statusCode;
     LEP_UINT32 done;
     LEP_UINT16 crcExpected, crcActual;
+    LEP_UINT16 timeoutCount = LEPTON_I2C_COMMAND_BUSY_WAIT_COUNT;
 
     /* Implement the Lepton TWI READ Protocol
     */
@@ -230,6 +231,7 @@ LEP_RESULT LEP_I2C_GetAttribute(LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
     ** polling the statusReg REGISTER BUSY Bit until it reports NOT
     ** BUSY.
     */ 
+    timeoutCount = LEPTON_I2C_COMMAND_BUSY_WAIT_COUNT;
     do
     {
         /* Read the statusReg REGISTER and peek at the BUSY Bit
@@ -270,7 +272,7 @@ LEP_RESULT LEP_I2C_GetAttribute(LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
                                         attributePtr,
                                         attributeWordLength );
     }
-    else if( attributeWordLength <= 1024 )
+    else if( attributeWordLength <= (LEP_I2C_DATA_BUFFER_0_LENGTH / sizeof(LEP_UINT16)) )
     {
         /* Read from the DATA Block Buffer
         */ 
@@ -359,7 +361,7 @@ LEP_RESULT LEP_I2C_SetAttribute(LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
                                              attributePtr,
                                              attributeWordLength );
         }
-        else if( attributeWordLength <= 1024 )
+        else if( attributeWordLength <= (LEP_I2C_DATA_BUFFER_0_LENGTH / sizeof(LEP_UINT16)) )
         {
             /* WRITE to the DATA Block Buffer
             */     
@@ -401,6 +403,7 @@ LEP_RESULT LEP_I2C_SetAttribute(LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
                 ** polling the statusReg REGISTER BUSY Bit until it reports NOT
                 ** BUSY.
                 */ 
+                timeoutCount = LEPTON_I2C_COMMAND_BUSY_WAIT_COUNT;
                 do
                 {
                     /* Read the statusReg REGISTER and peek at the BUSY Bit
@@ -498,6 +501,7 @@ LEP_RESULT LEP_I2C_RunCommand(LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
                 ** polling the statusReg REGISTER BUSY Bit until it reports NOT
                 ** BUSY.
                 */ 
+                timeoutCount = LEPTON_I2C_COMMAND_BUSY_WAIT_COUNT;
                 do
                 {
                     /* Read the statusReg REGISTER and peek at the BUSY Bit
@@ -572,6 +576,11 @@ LEP_RESULT LEP_I2C_DirectWriteBuffer(LEP_CAMERA_PORT_DESC_T_PTR portDescPtr,
                                      LEP_UINT16 attributeWordLength)
 {
    LEP_RESULT result = LEP_OK;
+
+   if( attributeWordLength > (LEP_I2C_DATA_BUFFER_0_LENGTH / sizeof(LEP_UINT16)) )
+   {
+      return(LEP_RANGE_ERROR);
+   }
 
    /* WRITE to the DATA Block Buffer
    */     

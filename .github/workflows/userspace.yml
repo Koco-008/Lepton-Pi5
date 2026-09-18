@@ -1,0 +1,43 @@
+name: Userspace build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lepton-streamer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Build streamer with strict warnings
+        run: >-
+          make -C lepton_streamer clean all
+          CFLAGS='-O2 -g -std=c11 -Wall -Wextra -Wpedantic -Werror'
+      - name: Run deterministic frame pipeline tests
+        run: >-
+          make -C lepton_streamer check
+          CFLAGS='-O2 -g -std=c11 -Wall -Wextra -Wpedantic -Werror'
+      - name: Build legacy collector with strict warnings
+        run: >-
+          make -C lepton_data_collector clean all
+          CFLAGS='-O2 -g -std=c11 -Wall -Wextra -Wpedantic -Werror'
+      - name: Build and run VoSPI library tests
+        run: |
+          make -C lepton_vospi_lib clean
+          make -C lepton_vospi_lib CFLAGS='-O2 -g -std=c11 -Wall -Wextra -Wpedantic -Werror'
+          ./lepton_vospi_lib/test_lepton_driver_lib
+      - name: Python syntax check
+        run: python3 -m py_compile tools/raw_to_pgm.py
+      - name: Validate shell syntax
+        run: |
+          sh -n tools/install_streams_rpi5.sh
+          sh -n tools/uninstall_streams_rpi5.sh
+          sh -n tools/test_streams_rpi5.sh
+          sh -n tools/diagnose.sh
+          sh -n tools/install_rpi5.sh
+          sh -n tools/uninstall_rpi5.sh
+          sh -n tools/recover_lepton_rpi5.sh
+          sh -n tools/install_v1_rpi5.sh
