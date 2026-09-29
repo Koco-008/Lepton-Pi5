@@ -3,6 +3,7 @@ name: Radiometric integration tests
 on:
   push:
     branches:
+      - main
       - rpi5-radiometric
       - revised
   pull_request:
