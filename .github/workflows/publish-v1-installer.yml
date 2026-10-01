@@ -1,0 +1,30 @@
+name: Publish v1 installer asset
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the installer to
+        required: true
+        default: v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Validate installer syntax
+        run: sh -n install-v1.0.0.sh
+
+      - name: Upload installer to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release view "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" install-v1.0.0.sh --clobber
