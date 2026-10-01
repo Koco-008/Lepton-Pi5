@@ -41,3 +41,4 @@ jobs:
           sh -n tools/uninstall_rpi5.sh
           sh -n tools/recover_lepton_rpi5.sh
           sh -n tools/install_v1_rpi5.sh
+          sh -n install-v1.0.0.sh
