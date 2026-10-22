@@ -15,7 +15,11 @@ int cci_status_guard_check(int lock_fd, cci_status_reader reader, void *context,
         *device_error = 0;
     if (reason != NULL)
         *reason = CCI_GUARD_LOCK_FAILED;
-    if (lock_fd < -1) {\n        errno = EBADF;\n        return -1;\n    }\n    if (lock_fd >= 0 && flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
+    if (lock_fd < -1) {
+        errno = EBADF;
+        return -1;
+    }
+    if (lock_fd >= 0 && flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
         if (errno == EWOULDBLOCK || errno == EAGAIN) {
             if (reason != NULL)
                 *reason = CCI_GUARD_BUSY;
