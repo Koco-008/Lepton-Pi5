@@ -7,8 +7,10 @@ CFLAGS += -std=c11 -Wall -Wextra -Wpedantic
 
 APPLICATION := lepton_streamer
 TEST_APPLICATION := test_frame_pipeline
+CCI_TEST_APPLICATION := test_cci_status_guard
 COMMON_OBJECTS := frame_pipeline.o lepton_vospi_funcs.o
-APPLICATION_OBJECTS := lepton_streamer.o $(COMMON_OBJECTS) lep_i2cdev.o
+CCI_GUARD_OBJECT := cci_status_guard.o
+APPLICATION_OBJECTS := lepton_streamer.o $(COMMON_OBJECTS) $(CCI_GUARD_OBJECT) lep_i2cdev.o
 SDK_LIB := ../lepton_sdk/liblepton_sdk.a
 SDK_CFLAGS ?= -g -O2
 
@@ -23,6 +25,9 @@ $(APPLICATION): $(APPLICATION_OBJECTS) $(SDK_LIB)
 $(TEST_APPLICATION): test_frame_pipeline.o $(COMMON_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+$(CCI_TEST_APPLICATION): test_cci_status_guard.o $(CCI_GUARD_OBJECT)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 lepton_vospi_funcs.o: ../lepton_vospi_lib/lepton_vospi_funcs.c \
 	../lepton_vospi_lib/lepton_vospi_funcs.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
@@ -30,10 +35,11 @@ lepton_vospi_funcs.o: ../lepton_vospi_lib/lepton_vospi_funcs.c \
 lep_i2cdev.o: ../lepton_control/lep_i2cdev.c ../lepton_control/lep_i2cdev.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
-check: $(TEST_APPLICATION)
+check: $(TEST_APPLICATION) $(CCI_TEST_APPLICATION)
 	./$(TEST_APPLICATION)
+	./$(CCI_TEST_APPLICATION)
 
 clean:
-	rm -f *.o $(APPLICATION) $(TEST_APPLICATION)
+	rm -f *.o $(APPLICATION) $(TEST_APPLICATION) $(CCI_TEST_APPLICATION)
 
 .PHONY: all check clean

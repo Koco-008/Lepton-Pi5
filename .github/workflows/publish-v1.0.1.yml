@@ -1,0 +1,59 @@
+name: Publish Lepton-Pi5 v1.0.1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - RELEASE_NOTES_v1.0.1.md
+      - tools/update_streamer_v1_0_1.sh
+      - .github/workflows/publish-v1.0.1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lepton-pi5-v1.0.1-release
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Verify reviewed fix ancestry and release documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = main
+          git merge-base --is-ancestor 20be84ea89c030822159ba70934bb66c3a1d45e6 HEAD
+          test -s RELEASE_NOTES_v1.0.1.md
+          test -s tools/update_streamer_v1_0_1.sh
+          sh -n tools/update_streamer_v1_0_1.sh
+      - name: Verify CCI guard and frame pipeline
+        run: |
+          make -C lepton_sdk
+          make -C lepton_streamer clean all check CFLAGS='-O2 -g -std=c11 -Wall -Wextra -Wpedantic -Werror'
+          make check
+      - name: Check that v1.0.1 has not already been published
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api repos/${{ github.repository }}/git/ref/tags/v1.0.1 >/dev/null 2>&1; then
+            echo "Tag v1.0.1 already exists; refusing to overwrite."
+            exit 1
+          fi
+      - name: Create immutable v1.0.1 tag and GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha256sum tools/update_streamer_v1_0_1.sh > SHA256SUMS-v1.0.1.txt
+          gh release create v1.0.1 tools/update_streamer_v1_0_1.sh SHA256SUMS-v1.0.1.txt --target "$(git rev-parse HEAD)" --title "Lepton-Pi5 v1.0.1" --notes-file RELEASE_NOTES_v1.0.1.md --latest
