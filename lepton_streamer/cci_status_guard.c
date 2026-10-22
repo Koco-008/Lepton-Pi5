@@ -2,6 +2,7 @@
 #include "cci_status_guard.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <sys/file.h>
 
 int cci_status_guard_check(int lock_fd, cci_status_reader reader, void *context,
