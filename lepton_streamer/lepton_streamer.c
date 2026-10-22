@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "frame_pipeline.h"
+#include "cci_status_guard.h"
 #include "LEPTON_SDK.h"
 #include "LEPTON_SYS.h"
 
@@ -16,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -33,6 +35,8 @@
 #define OUTPUT_POLL_TIMEOUT_MS 1000
 #define MAX_OUTPUT_DIMENSION 8192U
 #define STALL_RECOVERY_EXIT_STATUS 75
+#define CCI_LOCK_PATH "/run/lock/spot-lepton/cci.lock"
+#define CCI_FAILURE_LOG_INTERVAL_MS 5000U
 
 enum streamer_result {
 	STREAMER_ERROR = -1,
@@ -717,21 +721,40 @@ static uint64_t monotonic_milliseconds(void)
 	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
 }
 
-static int measurement_frame_is_valid(LEP_CAMERA_PORT_DESC_T *port,
-	uint64_t *ffc_dropped_frames)
+static int read_ffc_status(void *context, int *status)
 {
-	LEP_SYS_STATUS_E status = LEP_SYS_STATUS_ERROR;
-	LEP_RESULT result = LEP_GetSysFFCStatus(port, &status);
+    LEP_SYS_STATUS_E value = LEP_SYS_STATUS_ERROR;
+    LEP_RESULT result = LEP_GetSysFFCStatus(context, &value);
+    *status = (int)value;
+    return (int)result;
+}
 
-	if (result != LEP_OK) {
-		fprintf(stderr, "LEP_GetSysFFCStatus failed: %d\n", result);
-		return -1;
-	}
-	if (status != LEP_SYS_STATUS_READY) {
-		(*ffc_dropped_frames)++;
-		return 0;
-	}
-	return 1;
+static int measurement_frame_is_valid(LEP_CAMERA_PORT_DESC_T *port,
+    int lock_fd, uint64_t *ffc_dropped_frames)
+{
+    enum cci_guard_reason reason;
+    int device_error = 0;
+    int result = cci_status_guard_check(lock_fd, read_ffc_status, port,
+        (int)LEP_SYS_STATUS_READY, &device_error, &reason);
+    static uint64_t last_error_log_ms;
+    uint64_t now_ms;
+
+    if (result == 1)
+        return 1;
+    (*ffc_dropped_frames)++;
+    if (result < 0) {
+        fprintf(stderr, "Lepton CCI flock failed: %s\n", strerror(errno));
+        return -1;
+    }
+    if (reason == CCI_GUARD_READ_FAILED) {
+        now_ms = monotonic_milliseconds();
+        if (now_ms - last_error_log_ms >= CCI_FAILURE_LOG_INTERVAL_MS) {
+            fprintf(stderr, "LEP_GetSysFFCStatus failed: %d; dropping unverified frame\n",
+                device_error);
+            last_error_log_ms = now_ms;
+        }
+    }
+    return 0;
 }
 
 static void log_rejected_subframe(
@@ -771,6 +794,7 @@ static int process_capture_buffer(
 	struct output_device *raw_output,
 	struct output_device *color_output,
 	LEP_CAMERA_PORT_DESC_T *control_port,
+	int cci_lock_fd,
 	struct lepton_frame_range *range,
 	uint64_t *published_frames,
 	uint64_t *ffc_dropped_frames)
@@ -809,7 +833,7 @@ static int process_capture_buffer(
 	if (result != LEPTON_ASSEMBLE_FRAME_READY)
 		return 0;
 
-	result = measurement_frame_is_valid(control_port, ffc_dropped_frames);
+	result = measurement_frame_is_valid(control_port, cci_lock_fd, ffc_dropped_frames);
 	if (result < 0)
 		return -1;
 	if (result == 0)
@@ -849,6 +873,7 @@ static int run_streamer(const struct options *options)
 	struct lepton_frame_range range = { 0 };
 	LEP_CAMERA_PORT_DESC_T control_port;
 	bool control_port_open = false;
+	int cci_lock_fd = -1;
 	uint16_t *raw_frame = NULL;
 	uint8_t *raw_y16le = NULL;
 	uint8_t *color_yuyv = NULL;
@@ -875,6 +900,22 @@ static int run_streamer(const struct options *options)
 	}
 
 	lepton_frame_assembler_init(&assembler);
+    /* Systemd's RuntimeDirectory does not create this shared CCI lock.
+     * When it is available, refuse to proceed if it cannot be opened:
+     * otherwise competing clients could silently bypass coordination.
+     * Standalone use without the SPOT lock retains the legacy mode. */
+    cci_lock_fd = open(CCI_LOCK_PATH, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+    if (cci_lock_fd < 0 && errno != ENOENT) {
+        fprintf(stderr, "%s: %s\n", CCI_LOCK_PATH, strerror(errno));
+        goto done;
+    }
+    if (cci_lock_fd >= 0) {
+        struct stat lock_stat;
+        if (fstat(cci_lock_fd, &lock_stat) != 0 || !S_ISREG(lock_stat.st_mode)) {
+            fprintf(stderr, "%s: not a regular shared lock file\n", CCI_LOCK_PATH);
+            goto done;
+        }
+    }
 	memset(&control_port, 0, sizeof(control_port));
 	if (LEP_OpenPort(1, LEP_CCI_TWI, 400, &control_port) != LEP_OK) {
 		fprintf(stderr, "Unable to open Lepton CCI port for FFC validity guard\n");
@@ -953,7 +994,7 @@ static int run_streamer(const struct options *options)
 		if (process_capture_buffer(
 				&capture, &buffer, &assembler, raw_frame, raw_y16le,
 				color_yuyv, options, &raw_output, &color_output,
-				&control_port, &range, &published_frames,
+				&control_port, cci_lock_fd, &range, &published_frames,
 				&ffc_dropped_frames) != 0) {
 			(void)xioctl(capture.fd, VIDIOC_QBUF, &buffer);
 			goto done;
@@ -999,6 +1040,8 @@ done:
 	close_output(&raw_output);
 	if (control_port_open)
 		(void)LEP_ClosePort(&control_port);
+	if (cci_lock_fd >= 0)
+		close(cci_lock_fd);
 	free(color_yuyv);
 	free(raw_y16le);
 	free(raw_frame);
