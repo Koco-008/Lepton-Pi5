@@ -42,3 +42,4 @@ jobs:
           sh -n tools/recover_lepton_rpi5.sh
           sh -n tools/install_v1_rpi5.sh
           sh -n install-v1.0.0.sh
+          sh -n tools/update_streamer_v1_0_1.sh
