@@ -43,7 +43,7 @@ int main(void)
     p.error = 0;
     p.status = 1;
     CHECK(cci_status_guard_check(-1, read_status, &p, 1, &err, &reason) == 1);
-    CHECK(cci_status_guard_check(-2, read_status, &p, 1, &err, &reason) == 1);
+    CHECK(cci_status_guard_check(-2, read_status, &p, 1, &err, &reason) == -1);
 
     CHECK(pipe(ready_pipe) == 0);
     CHECK(pipe(release_pipe) == 0);
